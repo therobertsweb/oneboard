@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard | ONEBoard{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    {% include "partials/sidebar_brand.html" %}
+    {% set active_page = "dashboard" %}
+    {% include "partials/sidebar_nav.html" %}
+  </aside>
+
+  <main class="dashboard-main">
+    <header class="topbar">
+      <div>
+        <p class="page-kicker">{{ t("dashboard.kicker") }}</p>
+        <h1>{{ t("dashboard.title") }}</h1>
+      </div>
+      <div class="topbar-actions">
+        {% include "partials/user_chip.html" %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("nav.logout") }}</button>
+        </form>
+      </div>
+    </header>
+
+    {% include "partials/alerts.html" %}
+
+    <section class="integration-panel">
+      <div>
+        <p class="page-kicker">{{ t("dashboard.integration") }}</p>
+        <h2>Search Console</h2>
+        {% if gsc.connected and gsc.selected_site_url %}
+        <p>{{ gsc.selected_site_url }}</p>
+        {% elif gsc.connected %}
+        <p>{{ t("dashboard.connected_select") }}</p>
+        {% else %}
+        <p>{{ t("dashboard.connect_prompt") }}</p>
+        {% endif %}
+      </div>
+      <div class="integration-actions">
+        {% if gsc.connected %}
+        <form method="post" action="{{ url_for('google_search_console_disconnect') }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("dashboard.disconnect") }}</button>
+        </form>
+        {% else %}
+        <a class="btn btn-primary" href="{{ url_for('google_search_console_connect') }}">{{ t("dashboard.connect_google") }}</a>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="dashboard-overview">
+      <article class="overview-card overview-card-primary">
+        <div>
+          <span class="overview-label">{{ t("dashboard.search_health") }}</span>
+          <strong>{{ t("dashboard.live_google") if gsc.connected else t("dashboard.pending_connection") }}</strong>
+          <p>{{ t("dashboard.search_health_connected") if gsc.connected else t("dashboard.search_health_waiting") }}</p>
+        </div>
+        <span class="overview-status {{ 'connected' if gsc.connected else '' }}"></span>
+      </article>
+      <article class="overview-card">
+        <span class="overview-label">{{ t("dashboard.active_property") }}</span>
+        <strong>{{ gsc.selected_site_url if gsc.selected_site_url else "-" }}</strong>
+      </article>
+      <article class="overview-card">
+        <span class="overview-label">{{ t("dashboard.reporting_window") }}</span>
+        <strong>{{ gsc.date_range.start }}</strong>
+        <p>{{ gsc.date_range.end }}</p>
+      </article>
+      <article class="overview-card">
+        <span class="overview-label">{{ t("dashboard.data_source") }}</span>
+        <strong>{{ t("dashboard.live_google") if gsc.connected else t("dashboard.pending_connection") }}</strong>
+      </article>
+    </section>
+
+    {% if not gsc.configured %}
+    <div class="alert alert-warning">
+      {{ t("dashboard.missing_google") }}
+    </div>
+    {% endif %}
+
+    {% if gsc.error %}
+    <div class="alert alert-danger">{{ gsc.error }}</div>
+    {% endif %}
+
+    {% if gsc.connected and gsc.sites %}
+    <section class="site-selector">
+      <form method="post" action="{{ url_for('google_search_console_select_site') }}">
+        <label for="site_url" class="form-label">{{ t("dashboard.property") }}</label>
+        <div class="site-selector-row">
+          <select class="form-select" id="site_url" name="site_url">
+            {% for site in gsc.sites %}
+            <option value="{{ site.siteUrl }}" {% if site.siteUrl == gsc.selected_site_url %}selected{% endif %}>
+              {{ site.siteUrl }}
+            </option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="btn btn-primary">{{ t("dashboard.apply") }}</button>
+        </div>
+      </form>
+    </section>
+    {% endif %}
+
+    <section class="stats-grid">
+      {% for item in gsc.stats %}
+      <article class="stat-card">
+        <div class="stat-card-top">
+          <span class="stat-dot"></span>
+          <small>{{ t("dashboard.performance") }}</small>
+        </div>
+        <span>{{ item.label }}</span>
+        <strong>{{ item.value }}</strong>
+        <small>{{ gsc.date_range.start }} {{ t("dashboard.date_to") }} {{ gsc.date_range.end }}</small>
+      </article>
+      {% endfor %}
+    </section>
+
+    <section class="chart-grid">
+      <article class="panel chart-panel">
+        <div class="panel-heading">
+          <h2>{{ t("dashboard.click_distribution") }}</h2>
+        </div>
+        {% if gsc.query_chart %}
+        <div class="metric-bars">
+          {% for row in gsc.query_chart %}
+          <div class="metric-bar-row">
+            <div class="metric-bar-meta">
+              <span>{{ row.label }}</span>
+              <strong>{{ row.display }}</strong>
+            </div>
+            <div class="metric-bar-track">
+              <span style="width: {{ row.pct }}%"></span>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state compact">{{ t("dashboard.no_chart_data") }}</div>
+        {% endif %}
+      </article>
+
+      <article class="panel chart-panel">
+        <div class="panel-heading">
+          <h2>{{ t("dashboard.top_pages_chart") }}</h2>
+        </div>
+        {% if gsc.page_chart %}
+        <div class="vertical-chart">
+          {% for row in gsc.page_chart %}
+          <div class="vertical-bar">
+            <div class="vertical-bar-fill" style="height: {{ row.pct }}%"></div>
+            <span>{{ row.display }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="chart-axis-labels">
+          {% for row in gsc.page_chart %}
+          <span>{{ row.label }}</span>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state compact">{{ t("dashboard.no_chart_data") }}</div>
+        {% endif %}
+      </article>
+    </section>
+
+    <section class="panel seo-opportunities-panel">
+      <div class="panel-heading">
+        <h2>{{ t("dashboard.seo_opportunities") }}</h2>
+      </div>
+      {% if gsc.seo_opportunities %}
+      <div class="seo-opportunity-grid">
+        {% for item in gsc.seo_opportunities %}
+        <article class="seo-opportunity-card">
+          <span>{{ t("dashboard.idea_source") }}</span>
+          <strong>{{ item.title }}</strong>
+          <p>{{ item.keyword }}</p>
+          <dl>
+            <div>
+              <dt>{{ t("metric.impressions") }}</dt>
+              <dd>{{ item.impressions }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("metric.clicks") }}</dt>
+              <dd>{{ item.clicks }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("metric.position") }}</dt>
+              <dd>{{ item.position }}</dd>
+            </div>
+          </dl>
+          <form method="post" action="{{ url_for('create_seo_suggestion_page') }}">
+            <input type="hidden" name="title" value="{{ item.title }}">
+            <input type="hidden" name="keyword" value="{{ item.keyword }}">
+            <button type="submit" class="btn btn-primary btn-sm">{{ t("dashboard.create_page") }}</button>
+          </form>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state compact">{{ t("dashboard.no_seo_opportunities") }}</div>
+      {% endif %}
+    </section>
+
+    <section class="content-grid">
+      <article class="panel">
+        <div class="panel-heading">
+          <h2>{{ t("dashboard.top_keywords") }}</h2>
+        </div>
+        {% if gsc.queries %}
+        <div class="table-responsive">
+          <table class="table seo-table align-middle">
+            <thead>
+              <tr>
+                <th>Keyword</th>
+                <th>{{ t("metric.clicks") }}</th>
+                <th>{{ t("metric.impressions") }}</th>
+                <th>{{ t("metric.ctr") }}</th>
+                <th>{{ t("metric.position") }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in gsc.queries %}
+              <tr>
+                <td>{{ row.key }}</td>
+                <td>{{ row.clicks }}</td>
+                <td>{{ row.impressions }}</td>
+                <td>{{ row.ctr }}</td>
+                <td>{{ row.position }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="empty-state">{{ t("dashboard.no_keywords") }}</div>
+        {% endif %}
+      </article>
+
+      <article class="panel">
+        <div class="panel-heading">
+          <h2>{{ t("dashboard.traffic_pages") }}</h2>
+        </div>
+        {% if gsc.pages %}
+        <div class="table-responsive">
+          <table class="table seo-table align-middle">
+            <thead>
+              <tr>
+                <th>{{ t("metric.page") }}</th>
+                <th>{{ t("metric.clicks") }}</th>
+                <th>{{ t("metric.impressions") }}</th>
+                <th>{{ t("metric.position") }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in gsc.pages %}
+              <tr>
+                <td class="url-cell">{{ row.key }}</td>
+                <td>{{ row.clicks }}</td>
+                <td>{{ row.impressions }}</td>
+                <td>{{ row.position }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="empty-state">{{ t("dashboard.no_pages") }}</div>
+        {% endif %}
+      </article>
+    </section>
+  </main>
+</div>
+{% endblock %}

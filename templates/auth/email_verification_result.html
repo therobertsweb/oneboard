@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}Email verification | ONEBoard{% endblock %}
+
+{% block body %}
+<main class="auth-page">
+  <section class="auth-panel">
+    <div class="brand-block">
+      <div class="brand-mark">OB</div>
+      <div>
+        <p class="brand-eyebrow">ONEBoard</p>
+        {% if verified %}
+        <h1>{% if current_lang() == "es" %}Tu correo electrónico ha sido verificado{% else %}Your email has been verified{% endif %}</h1>
+        {% else %}
+        <h1>{% if current_lang() == "es" %}Enlace de verificación no disponible{% else %}Verification link unavailable{% endif %}</h1>
+        {% endif %}
+      </div>
+    </div>
+    {% if verified %}
+    <p>{% if current_lang() == "es" %}Tu correo está verificado. Regresa a la aplicación ONEBoard e inicia sesión.{% else %}Your email is verified. Return to the ONEBoard app and sign in.{% endif %}</p>
+    {% else %}
+    <p>{% if current_lang() == "es" %}Este enlace es inválido o expiró. Regresa a ONEBoard para solicitar uno nuevo.{% else %}This verification link is invalid or has expired. Return to ONEBoard to request a new one.{% endif %}</p>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+
+{% block title %}Security Scan | ONEBoard{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    {% include "partials/sidebar_brand.html" %}
+    {% set active_page = "security_scan" %}
+    {% include "partials/sidebar_nav.html" %}
+  </aside>
+
+  <main class="dashboard-main">
+    <header class="topbar">
+      <div>
+        <p class="page-kicker">{{ t("scan.kicker") }}</p>
+        <h1>{{ t("nav.security_scan") }}</h1>
+      </div>
+      <div class="topbar-actions">
+        {% include "partials/user_chip.html" %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("nav.logout") }}</button>
+        </form>
+      </div>
+    </header>
+
+    {% include "partials/alerts.html" %}
+
+    <section class="scan-hero scan-hero-modern">
+      <div>
+        <p class="page-kicker">{{ t("scan.public_domain") }}</p>
+        <h2>{{ t("scan.title") }}</h2>
+        <p>{{ t("scan.intro") }}</p>
+      </div>
+      <form method="post" class="scan-form">
+        <div class="scan-search-box">
+          <label for="domain">{{ t("scan.domain") }}</label>
+          <input
+            type="text"
+            id="domain"
+            name="domain"
+            placeholder="example.com"
+            value="{{ domain }}"
+            autocomplete="off"
+            required
+          >
+          <button type="submit" class="btn btn-primary">{{ t("scan.analyze") }}</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="scan-history-panel">
+      <div class="panel-heading">
+        <h2>{{ t("scan.history") }}</h2>
+        <span class="status-pill info">{{ scan_history.total }}</span>
+      </div>
+      {% if scan_history.latest %}
+      <div class="scan-history-layout">
+        <div class="scan-progress-chart" aria-label="{{ t('scan.progress') }}">
+          {% for item in scan_history.chart %}
+          <div class="scan-progress-bar">
+            <span style="height: {{ item.bar_height }}%"></span>
+            <small>{{ item.score }}</small>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="scan-history-list">
+          {% for item in scan_history.latest %}
+          <article class="scan-history-item">
+            <div>
+              <strong>{{ item.domain }}</strong>
+              <span>{{ item.created_at }}</span>
+            </div>
+            <div class="scan-history-score">
+              <b>{{ item.score }}</b>
+              <span>{{ item.grade }}</span>
+            </div>
+            <div class="scan-history-change {{ 'up' if item.change and item.change > 0 else 'down' if item.change and item.change < 0 else '' }}">
+              {{ t("scan.score_change") }} {{ item.change_label }}
+            </div>
+          </article>
+          {% endfor %}
+        </div>
+      </div>
+      {% else %}
+      <div class="empty-state compact">{{ t("scan.history_empty") }}</div>
+      {% endif %}
+    </section>
+
+    {% if scan %}
+    <section class="scan-summary scan-summary-modern">
+      <article class="score-card grade-{{ scan.grade|lower|replace('+', 'plus') }}">
+        <div class="score-ring-visual" style="--score: {{ scan.score }};">
+          <strong>{{ scan.score }}</strong>
+          <small>/ 100</small>
+        </div>
+      </article>
+      <article class="score-detail">
+        <p class="page-kicker">{{ scan.domain }}</p>
+        <h2>{{ t("scan.grade") }} {{ scan.grade }}</h2>
+        <p>{{ scan.verdict }}</p>
+        <small>{{ t("scan.executed") }}: {{ scan.started_at }}</small>
+      </article>
+      <article class="scan-mini-metric">
+        <span>HTTPS</span>
+        <strong>{{ t("scan.available") if scan.http.https_available else t("scan.unavailable") }}</strong>
+      </article>
+      <article class="scan-mini-metric">
+        <span>{{ t("scan.hsts") }}</span>
+        <strong>{{ t("scan.active") if scan.tls.hsts else t("scan.not_detected") }}</strong>
+      </article>
+    </section>
+
+    <section class="scan-grid">
+      <article class="scan-panel">
+        <div class="scan-panel-header">
+          <h2>{{ t("scan.tls") }}</h2>
+          <span class="status-pill {{ scan.tls.status }}">{{ scan.tls.status }}</span>
+        </div>
+        <dl class="scan-list">
+          <div>
+            <dt>{{ t("scan.certificate") }}</dt>
+            <dd class="{{ 'ok' if scan.tls.valid else 'err' }}">{{ t("scan.valid") if scan.tls.valid else t("scan.not_validated") }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("scan.issuer") }}</dt>
+            <dd>{{ scan.tls.issuer }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("scan.protocol") }}</dt>
+            <dd>{{ scan.tls.protocol }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("scan.cipher") }}</dt>
+            <dd>{{ scan.tls.cipher }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("scan.expiration") }}</dt>
+            <dd>
+              {% if scan.tls.expires %}
+              {{ scan.tls.expires }}{% if scan.tls.days_remaining is not none %} · {{ scan.tls.days_remaining }} {{ t("scan.days") }}{% endif %}
+              {% else %}
+              {{ t("scan.not_available") }}
+              {% endif %}
+            </dd>
+          </div>
+          <div>
+            <dt>{{ t("scan.hsts") }}</dt>
+            <dd class="{{ 'ok' if scan.tls.hsts else 'warn' }}">{{ t("scan.active") if scan.tls.hsts else t("scan.not_detected") }}</dd>
+          </div>
+        </dl>
+        {% if scan.tls.error %}
+        <p class="scan-note danger">{{ scan.tls.error }}</p>
+        {% endif %}
+      </article>
+
+      <article class="scan-panel">
+        <div class="scan-panel-header">
+          <h2>DNS</h2>
+          <span class="status-pill {{ scan.dns.status }}">{{ scan.dns.status }}</span>
+        </div>
+        <dl class="scan-list">
+          <div>
+            <dt>{{ t("scan.resolution") }}</dt>
+            <dd class="{{ 'ok' if scan.dns.reachable else 'err' }}">{{ t("scan.correct") if scan.dns.reachable else t("scan.no_response") }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("scan.addresses") }}</dt>
+            <dd>
+              {% if scan.dns.addresses %}
+              {{ scan.dns.addresses|join(", ") }}
+              {% else %}
+              {{ t("scan.not_detected") }}
+              {% endif %}
+            </dd>
+          </div>
+        </dl>
+        {% for error in scan.dns.errors %}
+        <p class="scan-note danger">{{ error }}</p>
+        {% endfor %}
+      </article>
+
+      <article class="scan-panel full-width">
+        <div class="scan-panel-header">
+          <h2>{{ t("scan.security_headers") }}</h2>
+          <span class="status-pill {{ 'ok' if scan.http.missing_headers|length <= 2 else 'warn' }}">headers</span>
+        </div>
+        <div class="header-badges">
+          {% for header in scan.http.security_headers %}
+          <span class="scan-badge ok">{{ header }}</span>
+          {% endfor %}
+          {% for header in scan.http.missing_headers %}
+          <span class="scan-badge missing">{{ header }}</span>
+          {% endfor %}
+        </div>
+        <dl class="scan-list compact">
+          <div>
+            <dt>HTTPS</dt>
+            <dd class="{{ 'ok' if scan.http.https_available else 'err' }}">{{ t("scan.available") if scan.http.https_available else t("scan.unavailable") }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("scan.http_to_https") }}</dt>
+            <dd class="{{ 'ok' if scan.http.redirects_to_https else 'warn' }}">{{ t("scan.redirects") if scan.http.redirects_to_https else t("scan.not_confirmed") }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("scan.status") }}</dt>
+            <dd>{{ scan.http.status or t("scan.no_response") }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("scan.final_url") }}</dt>
+            <dd>{{ scan.http.final_url or t("scan.not_available") }}</dd>
+          </div>
+        </dl>
+        {% if scan.http.error %}
+        <p class="scan-note danger">{{ scan.http.error }}</p>
+        {% endif %}
+      </article>
+
+      <article class="scan-panel">
+        <div class="scan-panel-header">
+          <h2>{{ t("scan.tech_stack") }}</h2>
+          <span class="status-pill info">{{ t("scan.passive") }}</span>
+        </div>
+        <dl class="scan-list">
+          <div>
+            <dt>{{ t("scan.server") }}</dt>
+            <dd>{{ scan.tech.server }}</dd>
+          </div>
+          <div>
+            <dt>X-Powered-By</dt>
+            <dd class="{{ 'warn' if scan.tech.powered_by else 'ok' }}">{{ scan.tech.powered_by or t("scan.not_exposed") }}</dd>
+          </div>
+        </dl>
+        {% if scan.tech.hints %}
+        <div class="header-badges">
+          {% for hint in scan.tech.hints %}
+          <span class="scan-badge info">{{ hint }}</span>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="scan-note">{{ t("scan.no_stack_hints") }}</p>
+        {% endif %}
+      </article>
+
+      <article class="scan-panel">
+        <div class="scan-panel-header">
+          <h2>{{ t("scan.recommendations") }}</h2>
+          <span class="status-pill info">{{ scan.recommendations|length }}</span>
+        </div>
+        <ul class="recommendation-list">
+          {% for rec in scan.recommendations %}
+          <li>
+            <span class="priority {{ rec.priority }}">{{ rec.priority_label }}</span>
+            <strong>{{ rec.title }}</strong>
+            <p>{{ rec.detail }}</p>
+          </li>
+          {% endfor %}
+        </ul>
+      </article>
+    </section>
+
+    <section class="scan-tools">
+      <div class="panel-heading">
+        <h2>{{ t("scan.external_tools") }}</h2>
+      </div>
+      <div class="tool-grid">
+        {% for tool in scan.tools %}
+        <a class="tool-card" href="{{ tool.url }}" target="_blank" rel="noreferrer">
+          <strong>{{ tool.name }}</strong>
+          <span>{{ tool.description }}</span>
+        </a>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+  </main>
+</div>
+{% endblock %}

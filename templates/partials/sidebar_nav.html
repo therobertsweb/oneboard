@@ -1,0 +1,7 @@
+<nav class="sidebar-nav">
+  <a class="{{ 'active' if active_page == 'dashboard' else '' }}" href="{{ url_for('dashboard') }}">{{ t("nav.dashboard") }}</a>
+  <a class="{{ 'active' if active_page == 'site_manager' else '' }}" href="{{ url_for('site_manager') }}">{{ t("nav.site_manager") }}</a>
+  <a class="{{ 'active' if active_page == 'security_scan' else '' }}" href="{{ url_for('security_scan') }}">{{ t("nav.security_scan") }}</a>
+  <a class="{{ 'active' if active_page == 'help' else '' }}" href="{{ url_for('help_page') }}">{{ t("nav.help") }}</a>
+  <a class="{{ 'active' if active_page == 'settings' else '' }}" href="{{ url_for('settings') }}">{{ t("nav.settings") }}</a>
+</nav>

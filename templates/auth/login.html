@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t("auth.login_title") }} | ONEBoard{% endblock %}
+
+{% block body %}
+<main class="auth-page">
+  <section class="auth-panel">
+    <div class="brand-block">
+      <div class="brand-mark">OB</div>
+      <div>
+        <p class="brand-eyebrow">ONEBoard</p>
+        <h1>{{ t("auth.login_title") }}</h1>
+      </div>
+    </div>
+
+    {% include "partials/alerts.html" %}
+
+    <form method="post" class="auth-form" novalidate>
+      <div class="mb-3">
+        <label for="email" class="form-label">{{ t("auth.email") }}</label>
+        <input type="email" class="form-control" id="email" name="email" placeholder="admin@empresa.com" autocomplete="email" required autofocus>
+      </div>
+      <div class="mb-3">
+        <label for="password" class="form-label">{{ t("auth.password") }}</label>
+        <input type="password" class="form-control" id="password" name="password" placeholder="{{ t('auth.password_placeholder') }}" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn btn-primary w-100">{{ t("auth.sign_in") }}</button>
+    </form>
+
+    <p class="auth-footer compact">
+      <a href="{{ url_for('forgot_password') }}">{{ t("auth.forgot_password") }}</a>
+    </p>
+
+    <form method="post" action="{{ url_for('resend_verification') }}" class="auth-form mt-3">
+      <input type="hidden" name="email" id="resend_email">
+      <button type="submit" class="btn btn-outline-secondary w-100">Resend verification email</button>
+    </form>
+
+    <p class="auth-footer">
+      {{ t("auth.no_account") }}
+      <a href="{{ url_for('register') }}">{{ t("auth.create_account") }}</a>
+    </p>
+  </section>
+</main>
+<script>
+  document.querySelector(".auth-form input[name='email']").addEventListener("input", function () {
+    document.getElementById("resend_email").value = this.value;
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t("nav.help") }} | ONEBoard{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    {% include "partials/sidebar_brand.html" %}
+    {% set active_page = "help" %}
+    {% include "partials/sidebar_nav.html" %}
+  </aside>
+
+  <main class="dashboard-main">
+    <header class="topbar">
+      <div>
+        <p class="page-kicker">Guía de uso</p>
+        <h1>{{ t("nav.help") }}</h1>
+      </div>
+      <div class="topbar-actions">
+        {% include "partials/user_chip.html" %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("nav.logout") }}</button>
+        </form>
+      </div>
+    </header>
+
+    <section class="help-hero panel">
+      <div>
+        <span class="overview-label">ONEBoard</span>
+        <h2>Optimización continua para sitios web</h2>
+        <p>
+          ONEBoard está diseñado para reducir la fricción de mantener un sitio web actualizado.
+          La meta es centralizar análisis, cambios con inteligencia artificial, control de archivos,
+          historial, respaldos y publicación remota para que la actualización constante del sitio sea
+          más rápida, más ordenada y menos riesgosa.
+        </p>
+      </div>
+    </section>
+
+    <section class="help-grid">
+      <article class="panel help-card">
+        <h2>Configuración inicial</h2>
+        <ol>
+          <li>Entra a <strong>Settings</strong> y guarda tu API key de Muse en la sección <strong>API de Muse</strong>.</li>
+          <li>En <strong>Site Manager</strong>, conecta el directorio local del website que ONEBoard puede editar.</li>
+          <li>Configura el destino remoto SSH/SFTP si el sitio vive en un servidor externo.</li>
+          <li>Crea un backup antes de cambios grandes o antes de publicar.</li>
+        </ol>
+      </article>
+
+      <article class="panel help-card">
+        <h2>Configurar la inteligencia artificial</h2>
+        <p>
+          La IA usa la API key del usuario autenticado. Esto evita que todos los clientes dependan de
+          una sola key del servidor y permite que el consumo se facture a la cuenta correcta.
+        </p>
+        <ol>
+          <li>Crea una API key en tu cuenta de Muse (Meta).</li>
+          <li>Pégala en <strong>Settings -> API de Muse</strong>.</li>
+          <li>Confirma con tu contraseña actual para guardar el cambio.</li>
+          <li>Desde <strong>Site Manager</strong>, escribe una solicitud o usa una acción rápida.</li>
+        </ol>
+      </article>
+
+      <article class="panel help-card">
+        <h2>Actualizar website con IA</h2>
+        <p>
+          Usa el área <strong>AI Website Studio</strong> para pedir cambios como actualizar textos,
+          crear secciones, mejorar llamadas a la acción o generar páginas completas. La IA recibe reglas
+          para mantenerse dentro del directorio conectado y respetar el diseño existente.
+        </p>
+        <p>
+          Si quieres que la IA use una imagen específica, súbela como imagen sugerida o selecciónala desde
+          la biblioteca de assets antes de enviar la solicitud.
+        </p>
+      </article>
+
+      <article class="panel help-card">
+        <h2>Acciones rápidas</h2>
+        <p>
+          Las acciones rápidas generan solicitudes comunes sin tener que escribir desde cero:
+          actualizar el hero, agregar una sección, mejorar el CTA o crear una landing. Puedes usarlas
+          tal cual o escribir instrucciones más específicas en el composer.
+        </p>
+      </article>
+
+      <article class="panel help-card">
+        <h2>Biblioteca de assets</h2>
+        <p>
+          La biblioteca guarda imágenes reutilizables del cliente. Después de subir una imagen puedes usar
+          el botón <strong>Usar imagen</strong> para que la próxima actualización de IA la tome como referencia.
+        </p>
+        <p>
+          La IA no publica automáticamente la imagen original desde la carpeta interna. Si decide usarla,
+          debe copiarla a la carpeta pública de assets del sitio y enlazar esa copia.
+        </p>
+      </article>
+
+      <article class="panel help-card">
+        <h2>Explorador de archivos</h2>
+        <p>
+          El explorador permite revisar carpetas, previsualizar archivos de texto e imágenes, elegir imágenes
+          para la IA y eliminar archivos cuando sea necesario. Las rutas se validan para que las acciones no
+          salgan del directorio del sitio conectado.
+        </p>
+      </article>
+
+      <article class="panel help-card">
+        <h2>Historial, diff y restauración</h2>
+        <p>
+          Cada actualización con IA crea un snapshot previo, registra archivos creados/modificados/eliminados
+          y muestra un diff para archivos de texto. Si un cambio no convence, puedes restaurar solo los archivos
+          tocados por esa actualización.
+        </p>
+        <p>
+          Los estados <strong>Pendiente</strong>, <strong>Aprobado</strong>, <strong>Publicado</strong> y
+          <strong>Restaurado</strong> ayudan a ordenar el flujo de revisión.
+        </p>
+      </article>
+
+      <article class="panel help-card">
+        <h2>Conexión SSH/SFTP</h2>
+        <p>
+          En <strong>Deploy remoto</strong> configura host, puerto, usuario, ruta remota y método de acceso.
+          Puedes usar llave SSH o contraseña. Si ya hay una contraseña guardada, deja el campo vacío para
+          conservarla.
+        </p>
+        <p>
+          Esta configuración prepara el flujo para publicar el workspace local en un servidor remoto de forma
+          controlada.
+        </p>
+      </article>
+
+      <article class="panel help-card">
+        <h2>Windows 11</h2>
+        <p>
+          En Windows 11 ONEBoard se ejecuta con Python y Waitress. Usa <strong>scripts/start-windows.ps1</strong>
+          o <strong>scripts/start-windows.bat</strong> para crear el entorno virtual, instalar dependencias y arrancar
+          el servidor.
+        </p>
+        <p>
+          Usa rutas locales como <strong>C:\Sites\example.com</strong>. Para SSH/SFTP habilita OpenSSH Client en Windows
+          y configura el acceso por llave o contraseña desde Deploy remoto.
+        </p>
+      </article>
+
+      <article class="panel help-card">
+        <h2>Redactor SEO</h2>
+        <p>
+          El redactor SEO ayuda a crear contenido con título, keyword, tono, audiencia y llamada a la acción.
+          Es útil para páginas de servicios, páginas locales, landing pages y mejoras de contenido existente.
+        </p>
+      </article>
+
+      <article class="panel help-card">
+        <h2>Security Scan</h2>
+        <p>
+          El escaneo de seguridad revisa señales pasivas del dominio: DNS, HTTPS, TLS, HSTS, cabeceras de
+          seguridad y tecnología expuesta. No ejecuta ataques ni pruebas intrusivas. Sirve para monitorear
+          la postura básica del sitio y ver progreso en el historial.
+        </p>
+      </article>
+
+      <article class="panel help-card">
+        <h2>Search Console</h2>
+        <p>
+          La integración con Google Search Console muestra rendimiento orgánico, páginas principales,
+          keywords y oportunidades SEO. Desde esas oportunidades se pueden crear nuevas páginas o pedir
+          contenido a la IA.
+        </p>
+      </article>
+
+      <article class="panel help-card contact-card">
+        <h2>Contactar con el desarrollador</h2>
+        <dl class="config-list">
+          <div>
+            <dt>Nombre</dt>
+            <dd>Roberto Castillo</dd>
+          </div>
+          <div>
+            <dt>Teléfono</dt>
+            <dd><a href="tel:7378081326">7378081326</a></dd>
+          </div>
+          <div>
+            <dt>Email</dt>
+            <dd><a href="mailto:Unknown_4792@proton.me">Unknown_4792@proton.me</a></dd>
+          </div>
+        </dl>
+      </article>
+    </section>
+  </main>
+</div>
+{% endblock %}

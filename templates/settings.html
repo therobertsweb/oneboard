@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t("settings.title") }} | ONEBoard{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    {% include "partials/sidebar_brand.html" %}
+    {% set active_page = "settings" %}
+    {% include "partials/sidebar_nav.html" %}
+  </aside>
+
+  <main class="dashboard-main">
+    <header class="topbar">
+      <div>
+        <p class="page-kicker">{{ t("settings.account") }}</p>
+        <h1>{{ t("settings.title") }}</h1>
+      </div>
+      <div class="topbar-actions">
+        {% include "partials/user_chip.html" %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("nav.logout") }}</button>
+        </form>
+      </div>
+    </header>
+
+    {% include "partials/alerts.html" %}
+
+    <form method="post" enctype="multipart/form-data" class="settings-profile-grid" novalidate>
+      <section class="panel profile-card">
+        <div class="profile-photo-wrap">
+          {% if account.avatar_path %}
+          <img src="{{ url_for('uploaded_avatar', filename=account.avatar_path) }}" alt="" id="avatarPreview" class="profile-photo">
+          {% else %}
+          <div id="avatarPreviewFallback" class="profile-photo fallback">{{ account.name[:1]|upper }}</div>
+          <img src="" alt="" id="avatarPreview" class="profile-photo" hidden>
+          {% endif %}
+        </div>
+        <h2>{{ account.name }}</h2>
+        <p>{{ account.email }}</p>
+        <label class="avatar-upload">
+          <span>{{ t("settings.avatar") }}</span>
+          <input type="file" id="avatar" name="avatar" accept="image/png,image/jpeg,image/gif,image/webp">
+        </label>
+        <small>{{ t("settings.avatar_note") }}</small>
+      </section>
+
+      <section class="panel business-card-preview">
+        <div class="business-card-logo-wrap">
+          {% if account.company_logo_path %}
+          <img src="{{ url_for('uploaded_company_logo', filename=account.company_logo_path) }}" alt="" id="companyLogoPreview" class="business-card-logo">
+          {% else %}
+          <div id="companyLogoPreviewFallback" class="business-card-logo fallback">{{ (account.company_name or "OB")[:2]|upper }}</div>
+          <img src="" alt="" id="companyLogoPreview" class="business-card-logo" hidden>
+          {% endif %}
+        </div>
+        <div>
+          <span class="overview-label">{{ t("settings.company") }}</span>
+          <h2>{{ account.company_name or "ONEBoard" }}</h2>
+          <p>{{ account.company_email or account.email }}</p>
+          <p>{{ account.company_website or "-" }}</p>
+        </div>
+      </section>
+
+      <section class="panel settings-form-panel">
+        <div class="panel-heading">
+          <h2>{{ t("settings.profile") }}</h2>
+        </div>
+        <div class="settings-form-grid">
+          <div>
+            <label for="name" class="form-label">{{ t("auth.name") }}</label>
+            <input type="text" class="form-control" id="name" name="name" value="{{ account.name }}" required>
+          </div>
+          <div>
+            <label for="email" class="form-label">{{ t("auth.email") }}</label>
+            <input type="email" class="form-control" id="email" name="email" value="{{ account.email }}" required>
+          </div>
+          <div>
+            <label for="language" class="form-label">{{ t("settings.language") }}</label>
+            <select class="form-select" id="language" name="language">
+              <option value="en" {% if current_lang() == "en" %}selected{% endif %}>{{ t("language.en") }}</option>
+              <option value="es" {% if current_lang() == "es" %}selected{% endif %}>{{ t("language.es") }}</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel settings-form-panel">
+        <div class="panel-heading">
+          <h2>{{ t("settings.company") }}</h2>
+        </div>
+        <div class="settings-form-grid">
+          <div>
+            <label for="company_name" class="form-label">{{ t("settings.company_name") }}</label>
+            <input type="text" class="form-control" id="company_name" name="company_name" value="{{ account.company_name or '' }}">
+          </div>
+          <div>
+            <label for="company_email" class="form-label">{{ t("settings.company_email") }}</label>
+            <input type="email" class="form-control" id="company_email" name="company_email" value="{{ account.company_email or '' }}">
+          </div>
+          <div>
+            <label for="company_website" class="form-label">{{ t("settings.company_website") }}</label>
+            <input type="url" class="form-control" id="company_website" name="company_website" value="{{ account.company_website or '' }}" placeholder="https://example.com">
+          </div>
+          <div>
+            <label class="form-label">{{ t("settings.company_logo") }}</label>
+            <label class="inline-file-upload">
+              <span>{{ t("settings.company_logo") }}</span>
+              <input type="file" id="company_logo" name="company_logo" accept="image/png,image/jpeg,image/gif,image/webp">
+            </label>
+            <small class="settings-note">{{ t("settings.company_logo_note") }}</small>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel settings-form-panel">
+        <div class="panel-heading">
+          <h2>{{ t("settings.security") }}</h2>
+        </div>
+        <div class="settings-form-grid">
+          <div>
+            <label for="current_password" class="form-label">{{ t("settings.current_password") }}</label>
+            <input type="password" class="form-control" id="current_password" name="current_password" autocomplete="current-password">
+          </div>
+          <div>
+            <label for="new_password" class="form-label">{{ t("settings.new_password") }}</label>
+            <input type="password" class="form-control" id="new_password" name="new_password" autocomplete="new-password">
+          </div>
+          <div>
+            <label for="confirm_new_password" class="form-label">{{ t("settings.confirm_new_password") }}</label>
+            <input type="password" class="form-control" id="confirm_new_password" name="confirm_new_password" autocomplete="new-password">
+          </div>
+        </div>
+      </section>
+
+      <section class="panel settings-form-panel">
+        <div class="panel-heading">
+          <h2>{{ t("settings.muse") }}</h2>
+        </div>
+        <p class="settings-note">
+          {{ t("settings.muse_note") }}
+          {% if account.muse_api_key %}{{ t("settings.muse_configured") }}.{% endif %}
+        </p>
+        <div class="settings-form-grid">
+          <div>
+            <label for="muse_api_key" class="form-label">{{ t("settings.muse_api_key") }}</label>
+            <input
+              type="password"
+              class="form-control"
+              id="muse_api_key"
+              name="muse_api_key"
+              placeholder="{{ t('settings.muse_api_key_placeholder') }}"
+              autocomplete="off"
+            >
+          </div>
+        </div>
+      </section>
+
+      <section class="panel settings-form-panel">
+        <div class="panel-heading">
+          <h2>Google Search Console</h2>
+        </div>
+        <p class="settings-note">{{ t("settings.google_note") }}</p>
+        <dl class="config-list">
+          <div>
+            <dt>{{ t("settings.client_id") }}</dt>
+            <dd>{{ t("settings.configured") if google_config.client_id_configured else t("settings.pending") }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("settings.client_secret") }}</dt>
+            <dd>{{ t("settings.configured") if google_config.client_secret_configured else t("settings.pending") }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("settings.redirect_uri") }}</dt>
+            <dd>{{ google_config.redirect_uri }}</dd>
+          </div>
+        </dl>
+        <button type="submit" class="btn btn-primary">{{ t("settings.update") }}</button>
+      </section>
+    </form>
+  </main>
+</div>
+
+<script>
+(() => {
+  const input = document.getElementById("avatar");
+  const preview = document.getElementById("avatarPreview");
+  const fallback = document.getElementById("avatarPreviewFallback");
+  const logoInput = document.getElementById("company_logo");
+  const logoPreview = document.getElementById("companyLogoPreview");
+  const logoFallback = document.getElementById("companyLogoPreviewFallback");
+
+  function bindPreview(fileInput, imagePreview, fallbackNode) {
+    if (!fileInput || !imagePreview) return;
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      const labelText = fileInput.closest("label") && fileInput.closest("label").querySelector("span");
+      if (labelText) labelText.textContent = file.name;
+      imagePreview.src = URL.createObjectURL(file);
+      imagePreview.hidden = false;
+      if (fallbackNode) fallbackNode.hidden = true;
+    });
+  }
+
+  bindPreview(input, preview, fallback);
+  bindPreview(logoInput, logoPreview, logoFallback);
+})();
+</script>
+{% endblock %}

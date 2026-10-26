@@ -1,0 +1,814 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t("site.title") }} | ONEBoard{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    {% include "partials/sidebar_brand.html" %}
+    {% set active_page = "site_manager" %}
+    {% include "partials/sidebar_nav.html" %}
+  </aside>
+
+  <main class="dashboard-main site-manager-main">
+    <header class="topbar">
+      <div>
+        <p class="page-kicker">{{ t("site.kicker") }}</p>
+        <h1>{{ t("site.title") }}</h1>
+      </div>
+      <div class="topbar-actions">
+        {% include "partials/user_chip.html" %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("nav.logout") }}</button>
+        </form>
+      </div>
+    </header>
+
+    {% include "partials/alerts.html" %}
+
+    <section class="site-manager-app">
+    <nav class="site-manager-tabs" aria-label="{{ t('site.title') }}">
+      <button type="button" class="site-manager-tab active" data-site-tab="studio">{{ t("site.tab_studio") }}</button>
+      <button type="button" class="site-manager-tab" data-site-tab="files" {% if not manager.files %}disabled{% endif %}>{{ t("site.tab_files") }}</button>
+      <button type="button" class="site-manager-tab" data-site-tab="remote">{{ t("site.tab_remote") }}</button>
+    </nav>
+
+    <section class="site-command-center">
+      <article class="site-status-card primary">
+        <div>
+          <span class="overview-label">{{ t("site.directory") }}</span>
+          <strong>{{ t("site.connected") if manager.directory else t("site.not_connected") }}</strong>
+          <p>{{ t("site.directory_note") }}</p>
+        </div>
+        <span class="overview-status {{ 'connected' if manager.directory else '' }}"></span>
+      </article>
+      <article class="site-status-card">
+        <span class="overview-label">{{ t("site.path") }}</span>
+        <strong>{{ manager.directory.path if manager.directory else "-" }}</strong>
+        <form method="post" action="{{ url_for('site_manager_connect') }}" data-api-url="{{ url_for('api_site_manager_connect') }}" data-ajax-refresh class="site-path-inline-form">
+          <input
+            type="text"
+            class="form-control"
+            name="path"
+            placeholder="{{ t('site.path_placeholder') }}"
+            value="{{ manager.directory.path if manager.directory else '' }}"
+            required
+          >
+          <button type="submit" class="btn btn-primary btn-sm">{{ t("site.connect") }}</button>
+        </form>
+      </article>
+      <article class="site-status-card">
+        <span class="overview-label">{{ t("site.backups") }}</span>
+        <strong>{{ manager.backups|length }}</strong>
+        <form method="post" action="{{ url_for('site_manager_backup') }}" data-api-url="{{ url_for('api_site_manager_backup') }}" data-ajax-refresh>
+          <button type="submit" class="btn btn-primary btn-sm" {% if not manager.directory %}disabled{% endif %}>
+            {{ t("site.create_backup") }}
+          </button>
+        </form>
+      </article>
+      <article class="site-status-card">
+        <span class="overview-label">{{ t("site.remote") }}</span>
+        <strong>{{ t("site.remote_connected") if manager.remote_connection else t("site.remote_not_connected") }}</strong>
+        {% if manager.remote_connection %}
+        <p>{{ manager.remote_connection.username }}@{{ manager.remote_connection.host }}:{{ manager.remote_connection.remote_path }}</p>
+        {% else %}
+        <p>{{ t("site.remote_note") }}</p>
+        {% endif %}
+      </article>
+    </section>
+
+    <div class="site-panel-frame">
+    <section class="site-ops-grid site-panel" data-site-panel="remote" hidden>
+      <article class="panel remote-panel">
+        <div class="panel-heading">
+          <h2>{{ t("site.remote") }}</h2>
+        </div>
+        <section class="ssh-key-card">
+          <div class="ssh-key-card-header">
+            <div>
+              <span class="overview-label">{{ t("site.ssh_key_setup") }}</span>
+              <p>{{ t("site.ssh_key_note") }}</p>
+            </div>
+            <button
+              type="button"
+              class="ssh-help-trigger"
+              data-bs-toggle="collapse"
+              data-bs-target="#sshKeyHelp"
+              aria-expanded="false"
+              aria-controls="sshKeyHelp"
+            >
+              {{ t("site.ssh_key_help_button") }}
+            </button>
+          </div>
+          <form method="post" action="{{ url_for('site_manager_generate_ssh_key') }}" data-api-url="{{ url_for('api_site_manager_generate_ssh_key') }}" data-ajax-refresh>
+            <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("site.ssh_key_generate") }}</button>
+          </form>
+          <div class="collapse ssh-help-popover" id="sshKeyHelp">
+            <div class="ssh-help">
+              <div class="ssh-help-heading">
+                <strong>{{ t("site.ssh_help_title") }}</strong>
+                <p>{{ t("site.ssh_help_intro") }}</p>
+              </div>
+              <ol class="ssh-help-steps">
+                <li>
+                  <strong>{{ t("site.ssh_help_step_1_title") }}</strong>
+                  <p>{{ t("site.ssh_help_step_1_body") }}</p>
+                </li>
+                <li>
+                  <strong>{{ t("site.ssh_help_step_2_title") }}</strong>
+                  <p>{{ t("site.ssh_help_step_2_body") }}</p>
+                </li>
+                <li>
+                  <strong>{{ t("site.ssh_help_step_3_title") }}</strong>
+                  <p>{{ t("site.ssh_help_step_3_body") }}</p>
+                  <code>{{ t("site.ssh_help_step_3_command") }}</code>
+                </li>
+                <li>
+                  <strong>{{ t("site.ssh_help_step_4_title") }}</strong>
+                  <p>{{ t("site.ssh_help_step_4_body") }}</p>
+                </li>
+                <li>
+                  <strong>{{ t("site.ssh_help_step_5_title") }}</strong>
+                  <p>{{ t("site.ssh_help_step_5_body") }}</p>
+                  <code>{{ t("site.ssh_help_step_5_command") }}</code>
+                </li>
+                <li>
+                  <strong>{{ t("site.ssh_help_step_6_title") }}</strong>
+                  <p>{{ t("site.ssh_help_step_6_body") }}</p>
+                </li>
+              </ol>
+              <div class="ssh-help-notes">
+                <div>
+                  <strong>{{ t("site.ssh_help_replace_title") }}</strong>
+                  <p>{{ t("site.ssh_help_replace_body") }}</p>
+                </div>
+                <div>
+                  <strong>{{ t("site.ssh_help_trouble_title") }}</strong>
+                  <p>{{ t("site.ssh_help_trouble_body") }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          {% if manager.ssh_key.exists %}
+          <div class="ssh-key-field">
+            <div>
+              <strong>{{ t("site.ssh_key_path") }}</strong>
+              <button type="button" class="copy-button" data-copy-target="sshPrivatePath">{{ t("site.ssh_key_copy") }}</button>
+            </div>
+            <code id="sshPrivatePath">{{ manager.ssh_key.private_path }}</code>
+          </div>
+          <div class="ssh-key-field">
+            <div>
+              <strong>{{ t("site.ssh_key_public") }}</strong>
+              <button type="button" class="copy-button" data-copy-target="sshPublicKey">{{ t("site.ssh_key_copy") }}</button>
+            </div>
+            <textarea id="sshPublicKey" class="ssh-copy-box" rows="3" readonly>{{ manager.ssh_key.public_key }}</textarea>
+          </div>
+          <div class="ssh-key-field">
+            <div>
+              <strong>{{ t("site.ssh_key_install_command") }}</strong>
+              <button type="button" class="copy-button" data-copy-target="sshInstallCommand">{{ t("site.ssh_key_copy") }}</button>
+            </div>
+            <textarea id="sshInstallCommand" class="ssh-copy-box" rows="4" readonly>{{ manager.ssh_key.install_command }}</textarea>
+          </div>
+          {% endif %}
+        </section>
+        <form method="post" action="{{ url_for('site_manager_remote_connect') }}" data-api-url="{{ url_for('api_site_manager_remote_connect') }}" data-ajax-refresh class="remote-form">
+          <div>
+            <label for="remote_host" class="form-label">{{ t("site.remote_host") }}</label>
+            <input type="text" class="form-control" id="remote_host" name="host" value="{{ manager.remote_connection.host if manager.remote_connection else '' }}" placeholder="example.com" required>
+          </div>
+          <div>
+            <label for="remote_port" class="form-label">{{ t("site.remote_port") }}</label>
+            <input type="number" class="form-control" id="remote_port" name="port" value="{{ manager.remote_connection.port if manager.remote_connection else 22 }}" min="1" max="65535" required>
+          </div>
+          <div>
+            <label for="remote_username" class="form-label">{{ t("site.remote_user") }}</label>
+            <input type="text" class="form-control" id="remote_username" name="username" value="{{ manager.remote_connection.username if manager.remote_connection else '' }}" placeholder="deploy" required>
+          </div>
+          <div>
+            <label for="remote_path" class="form-label">{{ t("site.remote_path") }}</label>
+            <input type="text" class="form-control" id="remote_path" name="remote_path" value="{{ manager.remote_connection.remote_path if manager.remote_connection else '' }}" placeholder="/var/www/example.com" required>
+          </div>
+          <div class="wide">
+            <label for="remote_auth_method" class="form-label">{{ t("site.remote_auth_method") }}</label>
+            <select class="form-select" id="remote_auth_method" name="auth_method">
+              <option value="key" {% if not manager.remote_connection or manager.remote_connection.auth_method != "password" %}selected{% endif %}>{{ t("site.remote_auth_key") }}</option>
+              <option value="password" {% if manager.remote_connection and manager.remote_connection.auth_method == "password" %}selected{% endif %}>{{ t("site.remote_auth_password") }}</option>
+            </select>
+          </div>
+          <div class="wide">
+            <label for="remote_key_path" class="form-label">{{ t("site.remote_key_path") }}</label>
+            <input type="text" class="form-control" id="remote_key_path" name="key_path" value="{{ manager.remote_connection.key_path if manager.remote_connection else manager.ssh_key.private_path if manager.ssh_key.exists else '' }}" placeholder="~/.ssh/id_ed25519">
+          </div>
+          <div class="wide">
+            <label for="remote_password" class="form-label">{{ t("site.remote_password") }}</label>
+            <input type="password" class="form-control" id="remote_password" name="password" placeholder="{{ t('site.remote_password_placeholder') }}" autocomplete="off">
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm">{{ t("site.remote_connect") }}</button>
+        </form>
+        {% if manager.remote_connection %}
+        <form method="post" action="{{ url_for('site_manager_remote_sync') }}" data-api-url="{{ url_for('api_site_manager_remote_sync') }}" data-ajax-refresh class="remote-sync-form">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("site.remote_sync") }}</button>
+          {% if manager.ssh_key.exists and manager.remote_connection.auth_method != "password" %}
+          <p>{{ t("site.remote_sync_note") }}</p>
+          {% endif %}
+        </form>
+        {% endif %}
+      </article>
+
+      <article class="panel update-history-panel">
+        <div class="panel-heading">
+          <h2>{{ t("site.update_history") }}</h2>
+        </div>
+        {% if manager.updates %}
+        <div class="update-history-list">
+          {% for update in manager.updates %}
+          <article class="update-history-item">
+            <div>
+              <strong>{{ update.source }} · {{ t("site." ~ update.status) if update.status else t("site.pending") }}</strong>
+              <span>{{ update.created_at }} · {{ t("site.exit_code") }}: {{ update.exit_code or "-" }}</span>
+            </div>
+            <p>{{ update.summary }}</p>
+            {% if update.files %}
+            <div class="update-files">
+              {% for file in update.files[:5] %}
+              <span>{{ file.change }}: {{ file.path }}</span>
+              {% endfor %}
+            </div>
+            {% endif %}
+            <details class="update-diff">
+              <summary>{{ t("site.diff") }}</summary>
+              {% if update.diff_summary %}
+              <pre><code>{{ update.diff_summary }}</code></pre>
+              {% else %}
+              <span>{{ t("site.no_diff") }}</span>
+              {% endif %}
+            </details>
+            <form method="post" action="{{ url_for('site_manager_update_action') }}" class="update-actions">
+              <input type="hidden" name="update_id" value="{{ update.id }}">
+              <button type="submit" name="action" value="approve" class="btn btn-outline-secondary btn-sm">{{ t("site.approve") }}</button>
+              <button type="submit" name="action" value="publish" class="btn btn-primary btn-sm">{{ t("site.publish") }}</button>
+              <button type="submit" name="action" value="restore" class="btn btn-outline-danger btn-sm" {% if not update.snapshot_path %}disabled{% endif %}>{{ t("site.restore_files") }}</button>
+            </form>
+          </article>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state compact">{{ t("site.no_updates") }}</div>
+        {% endif %}
+      </article>
+    </section>
+
+    <section class="site-workspace-grid site-panel active" data-site-panel="studio">
+      <article class="panel codex-update-panel">
+        <div class="codex-console-header">
+          <div>
+            <span class="overview-label">AI Website Studio</span>
+            <h2>{{ t("site.codex_update") }}</h2>
+          </div>
+          {% if manager.directory %}
+          <span class="codex-live-pill"><span></span>Muse</span>
+          {% endif %}
+        </div>
+
+        <div
+          class="codex-chat"
+          id="codexChat"
+          data-empty="{{ t('site.codex_empty') }}"
+          data-user-label="{{ 'You' if current_lang() == 'en' else 'Tú' }}"
+          data-assistant-label="Muse"
+          data-error-label="ONEBoard"
+        >
+          {% if manager.codex_messages %}
+          {% for message in manager.codex_messages %}
+          <article class="chat-message {{ message.role }}">
+            <div class="chat-avatar">{{ "U" if message.role == "user" else "AI" }}</div>
+            <div class="chat-bubble">
+              <div class="chat-meta">
+                <span>{{ "You" if message.role == "user" and current_lang() == "en" else "Tú" if message.role == "user" else "Muse" }}</span>
+                <small>{{ message.created_at }}</small>
+              </div>
+              <p>{{ message.content }}</p>
+            </div>
+          </article>
+          {% endfor %}
+          {% else %}
+          <div class="empty-state compact">{{ t("site.codex_empty") }}</div>
+          {% endif %}
+        </div>
+
+        <div class="codex-working" id="codexWorking" hidden>
+          <span class="thinking-dot"></span>
+          <span>{{ t("site.codex_working") }}</span>
+        </div>
+
+        <div class="quick-action-bar">
+          <span>{{ t("site.quick_actions") }}</span>
+          <button type="submit" form="codexUpdateForm" formnovalidate name="quick_prompt" value="{{ manager.quick_prompts.hero }}" class="btn btn-outline-secondary btn-sm">{{ t("site.quick_hero") }}</button>
+          <button type="submit" form="codexUpdateForm" formnovalidate name="quick_prompt" value="{{ manager.quick_prompts.section }}" class="btn btn-outline-secondary btn-sm">{{ t("site.quick_section") }}</button>
+          <button type="submit" form="codexUpdateForm" formnovalidate name="quick_prompt" value="{{ manager.quick_prompts.cta }}" class="btn btn-outline-secondary btn-sm">{{ t("site.quick_cta") }}</button>
+          <button type="submit" form="codexUpdateForm" formnovalidate name="quick_prompt" value="{{ manager.quick_prompts.landing }}" class="btn btn-outline-secondary btn-sm">{{ t("site.quick_landing") }}</button>
+        </div>
+
+        <form method="post" action="{{ url_for('site_manager_codex_update') }}" data-api-url="{{ url_for('api_site_manager_codex_update') }}" class="codex-update-form" id="codexUpdateForm" enctype="multipart/form-data">
+          {% if manager.selected_asset %}
+          <input type="hidden" name="selected_asset" value="{{ manager.selected_asset }}">
+          <div class="selected-asset-pill">{{ t("site.selected_asset") }}: {{ manager.selected_asset }}</div>
+          {% endif %}
+          <label class="codex-image-upload">
+            <span>{{ t("site.codex_image") }}</span>
+            <small>{{ t("site.codex_image_note") }}</small>
+            <span class="file-picker-button">{{ t("site.codex_image") }}</span>
+            <small class="file-picker-name" data-empty="{{ t('site.codex_image_note') }}">{{ t("site.codex_image_note") }}</small>
+            <input
+              type="file"
+              name="suggested_image"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              {% if not manager.directory %}disabled{% endif %}
+            >
+          </label>
+          <div class="codex-composer">
+            <textarea
+              id="codexPrompt"
+              name="prompt"
+              rows="3"
+              placeholder="{{ t('site.codex_prompt_placeholder') }}"
+              {% if not manager.directory %}disabled{% endif %}
+              required
+            ></textarea>
+            <button type="submit" class="btn btn-primary" id="codexSubmitBtn" {% if not manager.directory %}disabled{% endif %}>
+              {{ t("site.run_codex") }}
+            </button>
+          </div>
+        </form>
+      </article>
+
+      <aside class="site-side-stack">
+        <section class="panel asset-library-panel">
+          <div class="panel-heading">
+            <h2>{{ t("site.asset_library") }}</h2>
+          </div>
+          <form method="post" action="{{ url_for('site_manager_asset_upload') }}" enctype="multipart/form-data" class="asset-upload-form">
+            <label class="styled-file-upload">
+              <span class="file-picker-button">{{ t("site.asset_upload") }}</span>
+              <small class="file-picker-name" data-empty="{{ t('site.asset_empty') }}">{{ t("site.asset_empty") }}</small>
+              <input type="file" name="asset" accept="image/png,image/jpeg,image/gif,image/webp" {% if not manager.directory %}disabled{% endif %} required>
+            </label>
+            <button type="submit" class="btn btn-primary btn-sm" {% if not manager.directory %}disabled{% endif %}>{{ t("site.asset_upload") }}</button>
+          </form>
+          {% if manager.assets %}
+          <div class="asset-grid">
+            {% for asset in manager.assets %}
+            <article class="asset-card">
+              <img src="{{ asset.raw_url }}" alt="">
+              <strong>{{ asset.name }}</strong>
+              <span>{{ asset.size_label }}</span>
+              <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('site_manager', asset=asset.path) }}">{{ t("site.use_asset") }}</a>
+            </article>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="empty-state compact">{{ t("site.asset_empty") }}</div>
+          {% endif %}
+        </section>
+
+        <section class="panel seo-writer-panel">
+          <div class="panel-heading">
+            <h2>{{ t("site.seo_writer") }}</h2>
+          </div>
+          <form method="post" action="{{ url_for('site_manager_seo_content') }}" class="seo-writer-form">
+            <input class="form-control" type="text" name="title" placeholder="{{ t('site.seo_title') }}" {% if not manager.directory %}disabled{% endif %} required>
+            <input class="form-control" type="text" name="keyword" placeholder="{{ t('site.seo_keyword') }}" {% if not manager.directory %}disabled{% endif %} required>
+            <input class="form-control" type="text" name="tone" placeholder="{{ t('site.seo_tone') }}" {% if not manager.directory %}disabled{% endif %}>
+            <input class="form-control" type="text" name="audience" placeholder="{{ t('site.seo_audience') }}" {% if not manager.directory %}disabled{% endif %}>
+            <input class="form-control" type="text" name="cta" placeholder="{{ t('site.seo_cta') }}" {% if not manager.directory %}disabled{% endif %}>
+            <button type="submit" class="btn btn-primary btn-sm" {% if not manager.directory %}disabled{% endif %}>{{ t("site.create_content") }}</button>
+          </form>
+        </section>
+
+        <section class="panel terminal-panel">
+          <div class="panel-heading">
+            <h2>{{ t("site.terminal") }}</h2>
+          </div>
+          <div
+            class="terminal-screen interactive-terminal"
+            data-run-url="{{ url_for('site_manager_terminal_run') }}"
+            data-ready="{{ t('site.terminal_ready') }}"
+            data-disabled="{{ 'true' if not manager.directory else 'false' }}"
+          >
+            <div class="terminal-meta">
+              <span id="terminalCwd">{{ manager.directory.path if manager.directory else t("site.not_connected") }}</span>
+              <span id="terminalStatus">{{ t("site.terminal") }}</span>
+            </div>
+            <pre id="terminalOutput"><code>{% if terminal %}$ {{ terminal.command }}
+{{ terminal.output }}{% else %}{{ t("site.terminal_ready") }}{% endif %}</code></pre>
+            <div class="terminal-command-line">
+              <span>$</span>
+              <textarea
+                id="terminalCommand"
+                rows="1"
+                spellcheck="false"
+                autocomplete="off"
+                {% if not manager.directory %}disabled{% endif %}
+              ></textarea>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel backup-panel">
+          <div class="panel-heading">
+            <h2>{{ t("site.backups") }}</h2>
+          </div>
+          {% if manager.backups %}
+          <div class="backup-list">
+            {% for backup in manager.backups %}
+            <article class="backup-item">
+              <div>
+                <strong>{{ backup.filename }}</strong>
+                <span>{{ backup.created_at }} · {{ backup.size_label }} · {{ backup.file_count }} {{ t("site.files") }}</span>
+              </div>
+              <form method="post" action="{{ url_for('site_manager_restore') }}" class="restore-form">
+                <input type="hidden" name="backup_id" value="{{ backup.id }}">
+                <label class="restore-confirm">
+                  <input type="checkbox" name="confirm_restore" value="yes" required>
+                  <span>{{ t("site.restore_confirm") }}</span>
+                </label>
+                <button type="submit" class="btn btn-outline-danger btn-sm" {% if not backup.exists %}disabled{% endif %}>
+                  {{ t("site.restore") }}
+                </button>
+              </form>
+            </article>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="empty-state compact">{{ t("site.no_backups") }}</div>
+          {% endif %}
+        </section>
+      </aside>
+    </section>
+
+    {% if manager.files %}
+    <section class="panel file-explorer-panel site-panel" data-site-panel="files" hidden>
+      <div class="panel-heading">
+        <div>
+          <h2>{{ t("site.files_explorer") }}</h2>
+          <span class="panel-subtitle">{{ t("site.current_folder") }}: /{{ manager.files.current_path }}</span>
+        </div>
+      </div>
+      <div class="file-explorer-layout">
+        <div class="file-list">
+          {% if manager.files.current_path %}
+          <a class="file-row folder" href="{{ url_for('site_manager', path=manager.files.parent_path) }}">
+            <span>../</span>
+            <small>{{ t("site.parent_folder") }}</small>
+          </a>
+          {% endif %}
+          {% for item in manager.files.entries %}
+          {% if item.is_dir %}
+          <a class="file-row folder" href="{{ url_for('site_manager', path=item.path) }}">
+            <span>{{ item.name }}/</span>
+            <small>{{ item.modified_at }}</small>
+          </a>
+          {% else %}
+          <article class="file-row">
+            <div>
+              <span>{{ item.name }}</span>
+              <small>{{ item.size_label }} · {{ item.modified_at }}</small>
+            </div>
+            <div class="file-actions">
+              {% if item.previewable %}
+              <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('site_manager', path=manager.files.current_path, preview=item.path) }}">{{ t("site.preview") }}</a>
+              {% endif %}
+              {% if item.is_image %}
+              <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('site_manager', asset=item.path) }}">{{ t("site.use_asset") }}</a>
+              {% endif %}
+              <form method="post" action="{{ url_for('site_manager_file_delete') }}">
+                <input type="hidden" name="path" value="{{ item.path }}">
+                <label class="delete-confirm">
+                  <input type="checkbox" required>
+                  <span>{{ t("site.delete_confirm") }}</span>
+                </label>
+                <button type="submit" class="btn btn-outline-danger btn-sm">{{ t("site.delete") }}</button>
+              </form>
+            </div>
+          </article>
+          {% endif %}
+          {% endfor %}
+        </div>
+        <aside class="file-preview">
+          {% if manager.files.preview %}
+          <div class="panel-heading">
+            <h2>{{ manager.files.preview.name }}</h2>
+          </div>
+          {% if manager.files.preview.type == "image" %}
+          <img src="{{ manager.files.preview.raw_url }}" alt="">
+          {% elif manager.files.preview.type == "text" %}
+          <pre><code>{{ manager.files.preview.content }}</code></pre>
+          {% else %}
+          <div class="empty-state compact">{{ t("site.preview_unavailable") }}</div>
+          {% endif %}
+          {% else %}
+          <div class="empty-state compact">{{ t("site.preview") }}</div>
+          {% endif %}
+        </aside>
+      </div>
+    </section>
+    {% endif %}
+    </div>
+    </section>
+
+    <form method="post" action="{{ url_for('site_manager_terminal') }}" class="terminal-form fallback-terminal-form">
+      <label for="command" class="form-label">{{ t("site.command") }}</label>
+      <div class="terminal-row">
+        <input
+          type="text"
+          class="form-control terminal-input"
+          id="command"
+          name="command"
+          placeholder="{{ t('site.command_placeholder') }}"
+          value="{{ command }}"
+          autocomplete="off"
+          {% if not manager.directory %}disabled{% endif %}
+          required
+        >
+        <button type="submit" class="btn btn-primary" {% if not manager.directory %}disabled{% endif %}>
+          {{ t("site.run_command") }}
+        </button>
+      </div>
+    </form>
+
+    <noscript>
+      <div class="terminal-screen">
+        {% if terminal %}
+        <div class="terminal-meta">
+          <span>{{ terminal.cwd }}</span>
+          <span>{{ t("site.exit_code") }}: {{ terminal.exit_code }}</span>
+        </div>
+        <pre><code>$ {{ terminal.command }}
+{{ terminal.output }}</code></pre>
+        {% else %}
+        <pre><code>$ {{ t("site.command_placeholder") }}</code></pre>
+        {% endif %}
+      </div>
+    </noscript>
+  </main>
+</div>
+
+<script>
+(() => {
+  const siteTabs = document.querySelectorAll("[data-site-tab]");
+  const sitePanels = document.querySelectorAll("[data-site-panel]");
+
+  siteTabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const target = tab.dataset.siteTab;
+      siteTabs.forEach((item) => {
+        item.classList.toggle("active", item === tab);
+      });
+      sitePanels.forEach((panel) => {
+        const isActive = panel.dataset.sitePanel === target;
+        panel.hidden = !isActive;
+        panel.classList.toggle("active", isActive);
+      });
+    });
+  });
+
+  document.querySelectorAll("form[data-ajax-refresh]").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      if (!window.fetch || !form.dataset.apiUrl) return;
+      event.preventDefault();
+      const submitter = event.submitter;
+      const button = submitter && submitter.tagName === "BUTTON" ? submitter : form.querySelector("button[type='submit']");
+      const originalLabel = button ? button.textContent : "";
+      if (button) {
+        button.disabled = true;
+        button.textContent = "...";
+      }
+      try {
+        const response = await fetch(form.dataset.apiUrl, {
+          method: "POST",
+          body: new FormData(form),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          throw new Error(data.error || "Request failed.");
+        }
+        window.location.reload();
+      } catch (error) {
+        alert(error.message);
+        if (button) {
+          button.disabled = false;
+          button.textContent = originalLabel;
+        }
+      }
+    });
+  });
+
+  const codexForm = document.getElementById("codexUpdateForm");
+  const codexChat = document.getElementById("codexChat");
+  const codexWorking = document.getElementById("codexWorking");
+  const codexSubmitBtn = document.getElementById("codexSubmitBtn");
+  const codexSubmitLabel = codexSubmitBtn ? codexSubmitBtn.textContent.trim() : "";
+
+  function escapeHtml(value) {
+    return String(value || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function codexLabel(role) {
+    if (!codexChat) return role;
+    if (role === "user") return codexChat.dataset.userLabel || "You";
+    if (role === "assistant") return codexChat.dataset.assistantLabel || "Muse";
+    return codexChat.dataset.errorLabel || "ONEBoard";
+  }
+
+  function messageMarkup(message) {
+    const role = message.role === "user" ? "user" : message.role === "assistant" ? "assistant" : "system";
+    const avatar = role === "user" ? "U" : role === "assistant" ? "AI" : "!";
+    const createdAt = message.created_at || new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return `
+      <article class="chat-message ${role}">
+        <div class="chat-avatar">${avatar}</div>
+        <div class="chat-bubble">
+          <div class="chat-meta">
+            <span>${escapeHtml(codexLabel(role))}</span>
+            <small>${escapeHtml(createdAt)}</small>
+          </div>
+          <p>${escapeHtml(message.content)}</p>
+        </div>
+      </article>
+    `;
+  }
+
+  function setCodexMessages(messages) {
+    if (!codexChat) return;
+    if (!messages || !messages.length) {
+      codexChat.innerHTML = `<div class="empty-state compact">${escapeHtml(codexChat.dataset.empty || "")}</div>`;
+      return;
+    }
+    codexChat.innerHTML = messages.map(messageMarkup).join("");
+    codexChat.scrollTop = codexChat.scrollHeight;
+  }
+
+  function appendCodexMessage(message) {
+    if (!codexChat) return;
+    codexChat.querySelector(".empty-state")?.remove();
+    codexChat.insertAdjacentHTML("beforeend", messageMarkup(message));
+    codexChat.scrollTop = codexChat.scrollHeight;
+  }
+
+  function setCodexBusy(isBusy) {
+    if (codexWorking) codexWorking.hidden = !isBusy;
+    if (codexSubmitBtn) {
+      codexSubmitBtn.disabled = isBusy;
+      codexSubmitBtn.textContent = isBusy ? codexWorking.textContent.trim() : codexSubmitLabel;
+    }
+    codexForm?.querySelectorAll("textarea, input, button").forEach((control) => {
+      if (control === codexSubmitBtn || control.name === "prompt" || control.name === "suggested_image") {
+        control.disabled = isBusy;
+      }
+    });
+    document.querySelectorAll("[form='codexUpdateForm'][name='quick_prompt']").forEach((control) => {
+      control.disabled = isBusy;
+    });
+  }
+
+  if (codexChat) {
+    codexChat.scrollTop = codexChat.scrollHeight;
+  }
+
+  if (codexForm && codexChat && codexSubmitBtn && window.fetch) {
+    codexForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (codexSubmitBtn.disabled) return;
+
+      const submitter = event.submitter;
+      const promptInput = codexForm.querySelector("[name='prompt']");
+      const prompt = (submitter && submitter.name === "quick_prompt" ? submitter.value : promptInput.value).trim();
+      if (!prompt) {
+        promptInput.focus();
+        return;
+      }
+
+      const formData = new FormData(codexForm);
+      if (submitter && submitter.name) {
+        formData.set(submitter.name, submitter.value);
+      }
+
+      appendCodexMessage({ role: "user", content: prompt });
+      if (promptInput) promptInput.value = "";
+      setCodexBusy(true);
+
+      try {
+        const response = await fetch(codexForm.dataset.apiUrl, { method: "POST", body: formData });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          appendCodexMessage({ role: "system", content: data.error || "Request failed." });
+          return;
+        }
+        setCodexMessages(data.manager.codex_messages || []);
+      } catch (error) {
+        appendCodexMessage({ role: "system", content: error.message });
+      } finally {
+        setCodexBusy(false);
+        codexForm.reset();
+        document.querySelectorAll(".codex-image-upload .file-picker-name").forEach((name) => {
+          name.textContent = name.dataset.empty || "";
+        });
+        promptInput?.focus();
+      }
+    });
+  }
+
+  document.querySelectorAll(".styled-file-upload input, .codex-image-upload input").forEach((input) => {
+    input.addEventListener("change", () => {
+      const label = input.closest(".styled-file-upload, .codex-image-upload");
+      const name = label && label.querySelector(".file-picker-name");
+      if (!name) return;
+      const file = input.files && input.files[0];
+      name.textContent = file ? file.name : name.dataset.empty || "";
+    });
+  });
+
+  document.querySelectorAll("[data-copy-target]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const target = document.getElementById(button.dataset.copyTarget);
+      const value = target ? ("value" in target ? target.value : target.textContent) : "";
+      if (!value) return;
+      try {
+        await navigator.clipboard.writeText(value.trim());
+        const label = button.textContent;
+        button.textContent = "OK";
+        setTimeout(() => {
+          button.textContent = label;
+        }, 1400);
+      } catch (error) {
+        if ("select" in target) {
+          target.select();
+        }
+      }
+    });
+  });
+
+  const terminal = document.querySelector(".interactive-terminal");
+  if (!terminal || terminal.dataset.disabled === "true") return;
+
+  const output = document.getElementById("terminalOutput");
+  const commandInput = document.getElementById("terminalCommand");
+  const status = document.getElementById("terminalStatus");
+  const runUrl = terminal.dataset.runUrl;
+
+  function append(text) {
+    output.textContent = `${output.textContent}\n${text}`.trimStart();
+    output.scrollTop = output.scrollHeight;
+  }
+
+  function resizeInput() {
+    commandInput.style.height = "auto";
+    commandInput.style.height = `${commandInput.scrollHeight}px`;
+  }
+
+  async function runCommand(command) {
+    append(`$ ${command}`);
+    status.textContent = "running";
+    commandInput.disabled = true;
+
+    const formData = new FormData();
+    formData.append("command", command);
+
+    try {
+      const response = await fetch(runUrl, { method: "POST", body: formData });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        append(data.error || "Command failed.");
+      } else {
+        append(data.terminal.output);
+        status.textContent = `exit ${data.terminal.exit_code}`;
+      }
+    } catch (error) {
+      append(error.message);
+      status.textContent = "error";
+    } finally {
+      commandInput.disabled = false;
+      commandInput.value = "";
+      resizeInput();
+      commandInput.focus();
+    }
+  }
+
+  terminal.addEventListener("click", () => commandInput.focus());
+  commandInput.addEventListener("input", resizeInput);
+  commandInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey) return;
+    event.preventDefault();
+    const command = commandInput.value.trim();
+    if (command) runCommand(command);
+  });
+})();
+</script>
+{% endblock %}

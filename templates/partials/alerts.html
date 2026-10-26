@@ -1,0 +1,14 @@
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    <div class="flash-stack">
+      {% for category, message in messages %}
+        {% set tone = "danger" if category == "error" else category %}
+        <div class="alert alert-{{ tone }} alert-dismissible fade show app-alert" role="alert">
+          <span class="app-alert-icon" aria-hidden="true"></span>
+          <div class="app-alert-copy">{{ message }}</div>
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}

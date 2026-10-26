@@ -1,0 +1,8 @@
+<a class="sidebar-brand" href="{{ url_for('dashboard') }}">
+  {% if g.user and g.user.company_logo_path %}
+  <img src="{{ url_for('uploaded_company_logo', filename=g.user.company_logo_path) }}" alt="" class="brand-mark small brand-logo">
+  {% else %}
+  <span class="brand-mark small">OB</span>
+  {% endif %}
+  <span>{{ g.user.company_name if g.user and g.user.company_name else "ONEBoard" }}</span>
+</a>

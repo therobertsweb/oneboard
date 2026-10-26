@@ -1,0 +1,8 @@
+<span class="user-chip">
+  {% if g.user.avatar_path %}
+  <img src="{{ url_for('uploaded_avatar', filename=g.user.avatar_path) }}" alt="" class="user-avatar">
+  {% else %}
+  <span class="user-avatar fallback">{{ g.user["name"][:1]|upper }}</span>
+  {% endif %}
+  <span>{{ g.user["name"] }}</span>
+</span>
