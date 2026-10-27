@@ -158,8 +158,6 @@ TRANSLATIONS = {
         "auth.reset_instructions": "Enter your account email and ONEBoard will prepare a secure reset link.",
         "auth.reset_password": "Reset password",
         "auth.new_password": "New password",
-        "auth.reset_link": "Password reset link",
-        "auth.reset_link_note": "Development mode: use this link to complete the reset. Configure email delivery before production use.",
         "auth.no_account": "Don't have an account?",
         "auth.has_account": "Already have an account?",
         "dashboard.kicker": "Google Search Console",
@@ -434,6 +432,7 @@ TRANSLATIONS = {
         "flash.register_success": "Account created. You can now sign in.",
         "flash.reset_email_sent": "If that account exists, a password reset link has been prepared.",
         "flash.reset_token_invalid": "The reset link is invalid or expired.",
+        "flash.verification_token_invalid": "The verification link is invalid or expired.",
         "flash.password_reset_success": "Password updated. You can now sign in.",
         "flash.current_password_required": "Enter your current password to change email or password.",
         "flash.current_password_invalid": "The current password is incorrect.",
@@ -526,8 +525,6 @@ TRANSLATIONS = {
         "auth.reset_instructions": "Escribe el email de la cuenta y ONEBoard preparará un enlace seguro para restablecerla.",
         "auth.reset_password": "Restablecer contraseña",
         "auth.new_password": "Nueva contraseña",
-        "auth.reset_link": "Enlace de recuperación",
-        "auth.reset_link_note": "Modo desarrollo: usa este enlace para completar la recuperación. Configura envío de email antes de producción.",
         "auth.no_account": "¿No tienes cuenta?",
         "auth.has_account": "¿Ya tienes cuenta?",
         "dashboard.kicker": "Google Search Console",
@@ -802,6 +799,7 @@ TRANSLATIONS = {
         "flash.register_success": "Cuenta creada. Ahora puedes iniciar sesión.",
         "flash.reset_email_sent": "Si esa cuenta existe, se preparó un enlace para recuperar la contraseña.",
         "flash.reset_token_invalid": "El enlace de recuperación es inválido o expiró.",
+        "flash.verification_token_invalid": "El enlace de verificación es inválido o expiró.",
         "flash.password_reset_success": "Contraseña actualizada. Ya puedes iniciar sesión.",
         "flash.current_password_required": "Ingresa tu contraseña actual para cambiar email o contraseña.",
         "flash.current_password_invalid": "La contraseña actual es incorrecta.",
@@ -1102,19 +1100,21 @@ def create_app():
 
     @app.route("/forgot-password", methods=("GET", "POST"))
     def forgot_password():
-        reset_link = None
         if g.user:
             return redirect(url_for("dashboard"))
 
         if request.method == "POST":
             email = request.form.get("email", "").strip().lower()
-            user = query_db("SELECT id FROM users WHERE email = ?", (email,), one=True)
+            user = query_db("SELECT id, email FROM users WHERE email = ?", (email,), one=True)
             if user:
-                token = create_password_reset_token(user["id"])
-                reset_link = url_for("reset_password", token=token, _external=True)
+                try:
+                    send_password_reset_email(user["id"], user["email"])
+                except ValueError as error:
+                    flash(str(error), "danger")
+                    return redirect(url_for("forgot_password"))
             flash(translate("flash.reset_email_sent"), "info")
 
-        return render_template("auth/forgot_password.html", reset_link=reset_link)
+        return render_template("auth/forgot_password.html")
 
     @app.route("/reset-password/<token>", methods=("GET", "POST"))
     def reset_password(token):
@@ -1228,6 +1228,46 @@ def create_app():
         language = current_language()
         session.clear()
         session["lang"] = language
+        return jsonify({"ok": True})
+
+    @app.route("/api/auth/verify-email", methods=("POST",))
+    def api_verify_email():
+        data = request.get_json(silent=True) or {}
+        token = (data.get("token") or "").strip()
+        user_id = consume_email_verification_token(token) if token else None
+        if not user_id:
+            return api_error(translate("flash.verification_token_invalid"), 400)
+        execute_db("UPDATE users SET email_verified = 1 WHERE id = ?", (user_id,))
+        return jsonify({"ok": True, "verified": True})
+
+    @app.route("/api/auth/forgot-password", methods=("POST",))
+    def api_forgot_password():
+        data = request.get_json(silent=True) or {}
+        email = (data.get("email") or "").strip().lower()
+        user = query_db("SELECT id, email FROM users WHERE email = ?", (email,), one=True)
+        if user:
+            try:
+                send_password_reset_email(user["id"], user["email"])
+            except ValueError as error:
+                return api_error(str(error), 503)
+        return jsonify({"ok": True})
+
+    @app.route("/api/auth/reset-password", methods=("POST",))
+    def api_reset_password():
+        data = request.get_json(silent=True) or {}
+        token = (data.get("token") or "").strip()
+        password = data.get("password") or ""
+        confirm_password = data.get("confirm_password") or ""
+        token_row = get_valid_password_reset_token(token) if token else None
+        if not token_row:
+            return api_error(translate("flash.reset_token_invalid"), 400)
+        if not password or len(password) < 8 or password != confirm_password:
+            return api_error(translate("flash.password_incorrect"), 400)
+        execute_db(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (hash_password(password), token_row["user_id"]),
+        )
+        mark_password_reset_token_used(token_row["id"])
         return jsonify({"ok": True})
 
     @app.route("/api/dashboard")
@@ -6605,6 +6645,35 @@ def send_email_verification(user_id, recipient):
             server.send_message(message)
     except (OSError, smtplib.SMTPException) as error:
         raise ValueError("Unable to send the verification email. Check the SMTP configuration.") from error
+
+
+def send_password_reset_email(user_id, recipient):
+    settings = smtp_settings()
+    if not settings["host"] or not settings["from_address"]:
+        raise ValueError("Password reset is not configured. Set SMTP_HOST and SMTP_FROM.")
+    if bool(settings["username"]) != bool(settings["password"]):
+        raise ValueError("SMTP_USERNAME and SMTP_PASSWORD must be configured together.")
+
+    token = create_password_reset_token(user_id)
+    reset_url = url_for("reset_password", token=token, _external=True)
+    message = email.message.EmailMessage()
+    message["Subject"] = "Reset your ONEBoard password"
+    message["From"] = settings["from_address"]
+    message["To"] = recipient
+    message.set_content(
+        "You requested a password reset for your ONEBoard account.\n\n"
+        f"Reset your password here:\n{reset_url}\n\n"
+        "This link expires in 1 hour. If you did not request this, ignore this email."
+    )
+    try:
+        with smtplib.SMTP(settings["host"], settings["port"], timeout=20) as server:
+            if settings["use_tls"]:
+                server.starttls()
+            if settings["username"]:
+                server.login(settings["username"], settings["password"])
+            server.send_message(message)
+    except (OSError, smtplib.SMTPException) as error:
+        raise ValueError("Unable to send the reset email. Check the SMTP configuration.") from error
 
 
 def save_uploaded_image(user_id, upload, target_dir, prefix):
