@@ -232,6 +232,13 @@ TRANSLATIONS = {
         "social.text_required": "Write the post text or describe what to generate.",
         "social.prompt_required": "Describe what the post should say.",
         "social.image_url_invalid": "The image URL must be a complete http(s) address.",
+        "social.edit_instruction_required": "Describe how to edit the image.",
+        "social.upload_label": "Or upload your own image",
+        "social.upload_button": "Upload image",
+        "social.no_file": "No file chosen",
+        "social.edit_label": "Edit this image with AI (optional)",
+        "social.edit_placeholder": "E.g. make the sky sunset",
+        "social.edit_button": "Edit with AI",
         "social.kicker": "Social content",
         "social.title": "Create social posts",
         "social.composer": "Composer",
@@ -489,6 +496,7 @@ TRANSLATIONS = {
         "flash.email_invalid": "Enter a valid email.",
         "flash.password_update_mismatch": "The new passwords do not match.",
         "flash.avatar_invalid": "Upload a PNG, JPG, JPEG, GIF, or WEBP image.",
+        "flash.image_invalid": "The image is invalid or unavailable.",
         "flash.asset_required": "Choose an image to upload.",
         "flash.scan_failed": "The scan could not be completed: {error}",
         "flash.name_required": "Enter the account name.",
@@ -658,6 +666,13 @@ TRANSLATIONS = {
         "social.text_required": "Escribe el texto o describe qué generar.",
         "social.prompt_required": "Describe de qué debe tratar la publicación.",
         "social.image_url_invalid": "La URL de la imagen debe ser una dirección http(s) completa.",
+        "social.edit_instruction_required": "Describe cómo editar la imagen.",
+        "social.upload_label": "O sube tu propia imagen",
+        "social.upload_button": "Subir imagen",
+        "social.no_file": "Ningún archivo",
+        "social.edit_label": "Editar esta imagen con IA (opcional)",
+        "social.edit_placeholder": "Ej. pon el cielo al atardecer",
+        "social.edit_button": "Editar con IA",
         "social.kicker": "Contenido social",
         "social.title": "Crear publicaciones",
         "social.composer": "Redactor",
@@ -915,6 +930,7 @@ TRANSLATIONS = {
         "flash.email_invalid": "Ingresa un email válido.",
         "flash.password_update_mismatch": "Las nuevas contraseñas no coinciden.",
         "flash.avatar_invalid": "Sube una imagen PNG, JPG, JPEG, GIF o WEBP.",
+        "flash.image_invalid": "La imagen es inválida o no está disponible.",
         "flash.asset_required": "Selecciona una imagen para subir.",
         "flash.scan_failed": "No se pudo completar el análisis: {error}",
         "flash.name_required": "Ingresa el nombre de la cuenta.",
@@ -1102,6 +1118,14 @@ def create_app():
         if not safe_name.startswith(f"user-{g.user['id']}-"):
             abort(404)
         return send_from_directory(generated_image_directory(), safe_name)
+
+    @app.route("/uploads/social-images/<filename>")
+    @login_required
+    def uploaded_social_image(filename):
+        safe_name = posixpath.basename(filename or "")
+        if not safe_name.startswith(f"user-{g.user['id']}-"):
+            abort(404)
+        return send_from_directory(social_image_directory(), safe_name)
 
     @app.teardown_appcontext
     def close_db(error):
@@ -1829,6 +1853,61 @@ def create_app():
         except ValueError as error:
             return api_error(str(error), 400)
         return jsonify({"ok": True, "text": (run["response_text"] or "").strip()})
+
+    @app.route("/api/social/images/upload", methods=("POST",))
+    @login_required
+    def api_social_image_upload():
+        upload = request.files.get("image")
+        try:
+            if not upload or not (upload.filename or ""):
+                raise ValueError(translate("flash.avatar_invalid"))
+            saved = save_uploaded_image(g.user["id"], upload, social_image_directory(), "user")
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify(
+            {"ok": True, "image": {"filename": saved, "url": f"/uploads/social-images/{saved}"}}
+        )
+
+    @app.route("/api/social/images/edit", methods=("POST",))
+    @login_required
+    def api_social_image_edit():
+        data = request.get_json(silent=True) or {}
+        model = (data.get("model") or "").strip() or None
+        try:
+            source_path = resolve_own_social_image(g.user["id"], data.get("image_url"))
+        except ValueError as error:
+            return api_error(str(error), 400)
+        try:
+            with open(source_path, "rb") as file:
+                source_bytes = file.read(MAX_IMAGE_UPLOAD_BYTES + 1)
+        except OSError:
+            return api_error(translate("flash.image_invalid"), 400)
+        if len(source_bytes) > MAX_IMAGE_UPLOAD_BYTES:
+            return api_error(translate("flash.image_invalid"), 400)
+        instruction = (data.get("instruction") or "").strip()
+        try:
+            image = run_muse_image_edit(g.user["id"], source_bytes, instruction, model=model)
+        except ValueError as error:
+            save_ai_run(
+                g.user["id"],
+                "muse",
+                model or MUSE_IMAGE_DEFAULT_MODEL,
+                "image_edit",
+                instruction,
+                status="failed",
+                error_text=str(error),
+            )
+            return api_error(str(error), 400)
+        return jsonify(
+            {
+                "ok": True,
+                "image": {
+                    "filename": image["filename"],
+                    "url": f"/uploads/generated-images/{image['filename']}",
+                    "model": image["model"],
+                },
+            }
+        )
 
     @app.route("/api/social/buffer/posts", methods=("POST",))
     @login_required
@@ -5925,6 +6004,39 @@ def perform_json_request(url, payload, headers=None, timeout=90):
         raise ValueError(str(error.reason) if getattr(error, "reason", None) else str(error)) from error
 
 
+def perform_multipart_request(url, fields, files, headers=None, timeout=300):
+    boundary = f"----oneboard-{secrets.token_hex(16)}"
+    body = bytearray()
+    for name, value in (fields or {}).items():
+        body += f"--{boundary}\r\n".encode("utf-8")
+        body += f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8")
+        body += f"{value}\r\n".encode("utf-8")
+    for name, (filename, content, content_type) in (files or {}).items():
+        body += f"--{boundary}\r\n".encode("utf-8")
+        body += (
+            f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
+        ).encode("utf-8")
+        body += f"Content-Type: {content_type}\r\n\r\n".encode("utf-8")
+        body += content + b"\r\n"
+    body += f"--{boundary}--\r\n".encode("utf-8")
+    request_headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    if headers:
+        request_headers.update(headers)
+    req = urllib.request.Request(url, data=bytes(body), headers=request_headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        body_text = error.read().decode("utf-8", errors="replace")
+        try:
+            parsed = json.loads(body_text)
+        except json.JSONDecodeError:
+            parsed = {"error": {"message": body_text.strip() or str(error)}}
+        raise ValueError(extract_provider_error_message(parsed, fallback=str(error))) from error
+    except urllib.error.URLError as error:
+        raise ValueError(str(error.reason) if getattr(error, "reason", None) else str(error)) from error
+
+
 def extract_provider_error_message(payload, fallback="AI provider request failed."):
     if isinstance(payload, dict):
         error = payload.get("error")
@@ -6216,6 +6328,34 @@ def list_social_posts(user_id, limit=20):
     )
 
 
+def social_image_directory():
+    return os.path.join(UPLOAD_DIR, "social-images")
+
+
+def resolve_own_social_image(user_id, image_url):
+    candidate = (image_url or "").strip()
+    if not candidate:
+        raise ValueError(translate("flash.image_invalid"))
+    path = urllib.parse.urlparse(candidate).path or ""
+    directory = None
+    if path.startswith("/uploads/generated-images/"):
+        directory = generated_image_directory()
+    elif path.startswith("/uploads/social-images/"):
+        directory = social_image_directory()
+    if directory is None:
+        raise ValueError(translate("flash.image_invalid"))
+    safe_name = posixpath.basename(path)
+    prefix = f"user-{user_id}-"
+    if not safe_name.startswith(prefix):
+        raise ValueError(translate("flash.image_invalid"))
+    absolute_path = os.path.realpath(os.path.join(directory, safe_name))
+    if os.path.dirname(absolute_path) != os.path.realpath(directory):
+        raise ValueError(translate("flash.image_invalid"))
+    if not os.path.isfile(absolute_path):
+        raise ValueError(translate("flash.image_invalid"))
+    return absolute_path
+
+
 def generated_image_directory():
     directory = os.path.join(UPLOAD_DIR, "generated-images")
     os.makedirs(directory, exist_ok=True)
@@ -6297,6 +6437,72 @@ def run_muse_image_generation(user_id, prompt, model=None, output_format="png"):
         "response_id": response.get("id") or "",
         "output_format": output_format,
         "size_bytes": len(image_bytes),
+    }
+
+
+def run_muse_image_edit(user_id, image_bytes, instruction, model=None, output_format="png"):
+    instruction = (instruction or "").strip()
+    if not instruction:
+        raise ValueError(translate("social.edit_instruction_required"))
+    if not image_bytes:
+        raise ValueError(translate("flash.image_invalid"))
+    api_key = get_user_ai_provider_api_key(user_id, "muse")
+    if not api_key:
+        raise ValueError("No Muse API key configured.")
+    resolved_model = (model or "").strip() or MUSE_IMAGE_DEFAULT_MODEL
+    output_format = (output_format or "png").strip().lower() or "png"
+    response = perform_multipart_request(
+        f"{MUSE_API_BASE}/images/edits",
+        {"prompt": instruction, "model": resolved_model, "response_format": "b64_json"},
+        {"image": ("source.png", image_bytes, "image/png")},
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=300,
+    )
+    if isinstance(response, dict) and response.get("error"):
+        raise ValueError(extract_provider_error_message(response, "Image edit failed."))
+    edited_bytes = None
+    entries = (response.get("data") or []) if isinstance(response, dict) else []
+    if entries and isinstance(entries[0], dict):
+        payload = entries[0].get("b64_json") or ""
+        if payload:
+            try:
+                edited_bytes = base64.b64decode(payload)
+            except (ValueError, TypeError) as error:
+                raise ValueError("The Muse API returned an invalid image.") from error
+        elif entries[0].get("url"):
+            download = urllib.request.Request(entries[0]["url"], method="GET")
+            try:
+                with urllib.request.urlopen(download, timeout=60) as stream:
+                    edited_bytes = stream.read(MAX_IMAGE_UPLOAD_BYTES + 1)
+            except (urllib.error.URLError, OSError) as error:
+                raise ValueError("The Muse API did not return an image.") from error
+            if len(edited_bytes) > MAX_IMAGE_UPLOAD_BYTES:
+                raise ValueError("The Muse API returned an oversized image.")
+    if not edited_bytes:
+        raise ValueError("The Muse API did not return an image.")
+    directory = generated_image_directory()
+    filename = f"user-{user_id}-{datetime.now().strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(4)}.{output_format}"
+    image_path = os.path.join(directory, filename)
+    os.makedirs(directory, exist_ok=True)
+    with open(image_path, "wb") as file:
+        file.write(edited_bytes)
+    save_ai_run(
+        user_id,
+        "muse",
+        resolved_model,
+        "image_edit",
+        instruction,
+        status="completed",
+        response_text=filename,
+        usage={},
+    )
+    return {
+        "filename": filename,
+        "path": image_path,
+        "model": resolved_model,
+        "response_id": response.get("id") or "" if isinstance(response, dict) else "",
+        "output_format": output_format,
+        "size_bytes": len(edited_bytes),
     }
 
 

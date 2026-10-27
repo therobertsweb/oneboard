@@ -40,6 +40,8 @@
       data-channels-url="{{ url_for('api_social_buffer_channels') }}"
       data-generate-url="{{ url_for('api_social_generate') }}"
       data-images-url="{{ url_for('api_ai_images_generate') }}"
+      data-upload-url="{{ url_for('api_social_image_upload') }}"
+      data-edit-url="{{ url_for('api_social_image_edit') }}"
       data-posts-url="{{ url_for('api_social_buffer_create_post') }}"
       data-history-url="{{ url_for('api_social_buffer_history') }}"
       data-working="{{ t('social.working') }}"
@@ -75,6 +77,19 @@
             <div class="social-inline-row">
               <input type="text" class="form-control" id="socialImagePrompt" placeholder="{{ t('social.image_placeholder') }}">
               <button type="button" class="btn btn-outline-secondary" id="socialImageBtn">{{ t("social.image_button") }}</button>
+            </div>
+            <label class="form-label" for="socialImageFile">{{ t("social.upload_label") }}</label>
+            <div class="social-inline-row">
+              <label class="social-file-label" for="socialImageFile"><span id="socialFileName">{{ t("social.no_file") }}</span></label>
+              <input type="file" id="socialImageFile" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
+              <button type="button" class="btn btn-outline-secondary" id="socialUploadBtn">{{ t("social.upload_button") }}</button>
+            </div>
+            <div id="socialEditWrap" hidden>
+              <label for="socialEditPrompt" class="form-label">{{ t("social.edit_label") }}</label>
+              <div class="social-inline-row">
+                <input type="text" class="form-control" id="socialEditPrompt" placeholder="{{ t('social.edit_placeholder') }}">
+                <button type="button" class="btn btn-outline-secondary" id="socialEditBtn">{{ t("social.edit_button") }}</button>
+              </div>
             </div>
             <p class="social-hint" id="socialImageState" hidden>{{ t("social.image_attached") }}</p>
             <p class="social-hint warn" id="socialLocalhostNote" hidden>{{ t("social.localhost_warning") }}</p>
@@ -127,6 +142,12 @@
   const assistBtn = document.getElementById("socialAssistBtn");
   const imagePrompt = document.getElementById("socialImagePrompt");
   const imageBtn = document.getElementById("socialImageBtn");
+  const imageFile = document.getElementById("socialImageFile");
+  const fileName = document.getElementById("socialFileName");
+  const uploadBtn = document.getElementById("socialUploadBtn");
+  const editWrap = document.getElementById("socialEditWrap");
+  const editPrompt = document.getElementById("socialEditPrompt");
+  const editBtn = document.getElementById("socialEditBtn");
   const imageRemove = document.getElementById("socialImageRemove");
   const imageState = document.getElementById("socialImageState");
   const localhostNote = document.getElementById("socialLocalhostNote");
@@ -271,6 +292,16 @@
     }
   });
 
+  function setAttachedImage(relativeUrl) {
+    attachedImageUrl = relativeUrl ? new URL(relativeUrl, window.location.origin).href : "";
+    const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/.test(window.location.hostname);
+    imageState.hidden = !attachedImageUrl;
+    imageRemove.hidden = !attachedImageUrl;
+    editWrap.hidden = !attachedImageUrl;
+    localhostNote.hidden = !(attachedImageUrl && isLocal);
+    updatePreview();
+  }
+
   imageBtn.addEventListener("click", async () => {
     const prompt = imagePrompt.value.trim();
     if (!prompt) {
@@ -281,13 +312,7 @@
     statusLine.textContent = "";
     try {
       const data = await postJson(app.dataset.imagesUrl, { prompt });
-      const relative = (data.image && data.image.url) || "";
-      attachedImageUrl = relative ? new URL(relative, window.location.origin).href : "";
-      const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/.test(window.location.hostname);
-      imageState.hidden = !attachedImageUrl;
-      imageRemove.hidden = !attachedImageUrl;
-      localhostNote.hidden = !(attachedImageUrl && isLocal);
-      updatePreview();
+      setAttachedImage((data.image && data.image.url) || "");
     } catch (error) {
       statusLine.textContent = error.message;
     } finally {
@@ -295,12 +320,60 @@
     }
   });
 
+  const noFileLabel = fileName.textContent;
+  imageFile.addEventListener("change", () => {
+    const picked = imageFile.files && imageFile.files[0];
+    fileName.textContent = picked ? picked.name : noFileLabel;
+  });
+
+  uploadBtn.addEventListener("click", async () => {
+    const picked = imageFile.files && imageFile.files[0];
+    if (!picked) {
+      imageFile.click();
+      return;
+    }
+    setBusy(uploadBtn, true);
+    statusLine.textContent = "";
+    try {
+      const formData = new FormData();
+      formData.append("image", picked);
+      const response = await fetch(app.dataset.uploadUrl, { method: "POST", body: formData });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Request failed.");
+      }
+      setAttachedImage((data.image && data.image.url) || "");
+    } catch (error) {
+      statusLine.textContent = error.message;
+    } finally {
+      setBusy(uploadBtn, false);
+    }
+  });
+
+  editBtn.addEventListener("click", async () => {
+    const instruction = editPrompt.value.trim();
+    if (!instruction) {
+      editPrompt.focus();
+      return;
+    }
+    if (!attachedImageUrl) return;
+    setBusy(editBtn, true);
+    statusLine.textContent = "";
+    try {
+      const data = await postJson(app.dataset.editUrl, {
+        image_url: attachedImageUrl,
+        instruction,
+      });
+      setAttachedImage((data.image && data.image.url) || "");
+    } catch (error) {
+      statusLine.textContent = error.message;
+    } finally {
+      setBusy(editBtn, false);
+    }
+  });
+
   imageRemove.addEventListener("click", () => {
-    attachedImageUrl = "";
-    imageState.hidden = true;
-    imageRemove.hidden = true;
-    localhostNote.hidden = true;
-    updatePreview();
+    setAttachedImage("");
   });
 
   async function publish(draft) {

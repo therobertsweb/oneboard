@@ -1,3 +1,5 @@
+import base64
+import io
 import os
 import tempfile
 import unittest
@@ -194,6 +196,8 @@ class BufferTests(unittest.TestCase):
         self.assertIn('id="socialPreviewText"', body)
         self.assertIn('id="socialAssistBtn"', body)
         self.assertIn('id="socialImageBtn"', body)
+        self.assertIn('id="socialUploadBtn"', body)
+        self.assertIn('id="socialEditBtn"', body)
         self.assertIn('href="/social"', body)
 
     def test_social_generate_returns_ai_text(self):
@@ -254,3 +258,86 @@ class BufferTests(unittest.TestCase):
             json={"channel_id": "ch_1", "text": "Hi", "image_url": "not-a-url"},
         )
         self.assertEqual(bad_url.status_code, 400)
+
+    def test_social_image_upload_accepts_images_only(self):
+        png = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+            b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        response = self.client.post(
+            "/api/social/images/upload",
+            data={"image": (io.BytesIO(png), "mine.png")},
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        url = response.get_json()["image"]["url"]
+        self.assertTrue(url.startswith("/uploads/social-images/"))
+        served = self.client.get(url)
+        self.assertEqual(served.status_code, 200)
+        self.assertEqual(served.get_data(), png)
+
+        fake = self.client.post(
+            "/api/social/images/upload",
+            data={"image": (io.BytesIO(b"not an image"), "evil.txt")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(fake.status_code, 400)
+
+    def test_social_image_edit_uses_owned_images_only(self):
+        png = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+            b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        upload = self.client.post(
+            "/api/social/images/upload",
+            data={"image": (io.BytesIO(png), "mine.png")},
+            content_type="multipart/form-data",
+        )
+        source_url = upload.get_json()["image"]["url"]
+        with oneboard.app.app_context():
+            oneboard.execute_db(
+                "UPDATE users SET muse_api_key = ? WHERE id = ?",
+                ("test-muse-key", self.user_id),
+            )
+
+        calls = []
+
+        def fake_edits(url, fields, files, headers=None, timeout=300):
+            calls.append((url, fields, files))
+            return {"data": [{"b64_json": base64.b64encode(png).decode("ascii")}]}
+
+        with mock.patch.object(oneboard, "perform_multipart_request", side_effect=fake_edits):
+            edited = self.client.post(
+                "/api/social/images/edit",
+                json={"image_url": source_url, "instruction": "make it sunset"},
+            )
+
+        self.assertEqual(edited.status_code, 200, edited.get_data(as_text=True))
+        self.assertEqual(len(calls), 1)
+        self.assertIn("/images/edits", calls[0][0])
+        self.assertEqual(calls[0][1]["prompt"], "make it sunset")
+        self.assertIn("image", calls[0][2])
+        new_url = edited.get_json()["image"]["url"]
+        self.assertTrue(new_url.startswith("/uploads/generated-images/"))
+        self.assertNotEqual(new_url, source_url)
+
+        for bad_source in (
+            "https://evil.example.test/pic.png",
+            "/uploads/social-images/user-9999-other.png",
+            "/uploads/social-images/../../app.py",
+            "",
+        ):
+            denied = self.client.post(
+                "/api/social/images/edit",
+                json={"image_url": bad_source, "instruction": "x"},
+            )
+            self.assertEqual(denied.status_code, 400, bad_source)
+
+        missing_instruction = self.client.post(
+            "/api/social/images/edit",
+            json={"image_url": source_url},
+        )
+        self.assertEqual(missing_instruction.status_code, 400)

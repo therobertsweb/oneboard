@@ -56,6 +56,8 @@ Success envelope: `{ok: true, ...}`. Errors: `{ok: false, error}` with HTTP stat
 - `GET /api/social/buffer/channels` — connected social channels (needs Buffer key in Settings).
 - `GET /api/social/buffer/posts` — post history.
 - `POST /api/social/generate` — `{prompt, provider?, model?}` writes post text with AI (no publish).
+- `POST /api/social/images/upload` — multipart `image` (png/jpg/gif/webp) from the user.
+- `POST /api/social/images/edit` — `{image_url, instruction, model?}` edits the user's own generated/uploaded image with AI.
 - `POST /api/social/buffer/posts` — `{channel_id, text?, prompt?, image_url?, draft?}` publishes or drafts; `prompt` generates the text with AI; `image_url` must be a public http(s) address.
 
 ## Security scan & settings

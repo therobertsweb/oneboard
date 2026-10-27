@@ -3128,6 +3128,34 @@ a.file-row:hover {
   background: #0a0a0c;
 }
 
+.social-file-label {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.social-file-label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#socialEditWrap {
+  display: grid;
+  gap: 8px;
+}
+
+#socialEditWrap[hidden] {
+  display: none;
+}
+
 .social-history-panel {
   margin-bottom: 12px;
 }
