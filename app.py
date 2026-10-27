@@ -76,14 +76,15 @@ DEFAULT_LANGUAGE = "en"
 IS_WINDOWS = os.name == "nt"
 DEFAULT_AI_PROVIDER = "muse"
 AI_PROVIDER_MODELS = {
-    "muse": ["muse-image-1.0"],
+    "muse": ["muse-wonder-1.0", "muse-image-1.0"],
     "anthropic": ["claude-sonnet-4", "claude-3-5-haiku"],
     "openrouter": ["anthropic/claude-sonnet-4", "google/gemini-2.5-pro"],
     "google": ["gemini-2.5-pro", "gemini-2.5-flash"],
 }
 MUSE_API_BASE = "https://api.meta.ai/v1"
-MUSE_FALLBACK_MODELS = ["muse-image-1.0"]
+MUSE_FALLBACK_MODELS = ["muse-wonder-1.0", "muse-image-1.0"]
 MUSE_IMAGE_DEFAULT_MODEL = "muse-image-1.0"
+MUSE_TEXT_DEFAULT_MODEL = "muse-wonder-1.0"
 
 EXPECT_PASSWORD_SCRIPT = r"""
 set timeout [lindex $argv 0]
@@ -135,8 +136,9 @@ TRANSLATIONS = {
     "en": {
         "nav.dashboard": "Dashboard",
         "nav.seo": "SEO",
-        "nav.site_manager": "Site Manager",
+        "nav.site_manager": "Studio",
         "nav.security_scan": "Security Scan",
+        "nav.social": "Social",
         "nav.help": "Help",
         "nav.settings": "Settings",
         "nav.logout": "Sign out",
@@ -216,24 +218,71 @@ TRANSLATIONS = {
         "settings.confirm_new_password": "Confirm new password",
         "settings.google_note": "Google is managed privately on the server. Use the dashboard connection button to authorize your Search Console account.",
         "settings.muse": "Muse API",
-        "settings.muse_note": "Store your Muse API key here so AI website updates and image generation are billed to your own account.",
+        "settings.muse_note": "Store your Muse API key here so project creation and image generation use your own account.",
         "settings.muse_api_key": "Muse API key",
         "settings.muse_api_key_placeholder": "Leave blank to keep the saved key",
         "settings.muse_configured": "API key saved",
+        "settings.buffer": "Buffer API",
+        "settings.buffer_note": "Store your Buffer API key here to publish social content to your connected channels.",
+        "settings.buffer_api_key": "Buffer API key",
+        "settings.buffer_api_key_placeholder": "Leave blank to keep the saved key",
+        "settings.buffer_configured": "API key saved",
+        "social.buffer_key_required": "Add your Buffer API key in Settings to publish social content.",
+        "social.channel_required": "Choose one of your Buffer channels for this post.",
+        "social.text_required": "Write the post text or describe what to generate.",
+        "social.prompt_required": "Describe what the post should say.",
+        "social.image_url_invalid": "The image URL must be a complete http(s) address.",
+        "social.kicker": "Social content",
+        "social.title": "Create social posts",
+        "social.composer": "Composer",
+        "social.preview": "Preview",
+        "social.channel": "Channel",
+        "social.select_channel": "Select a channel",
+        "social.loading_channels": "Loading channels...",
+        "social.post_text": "Post text",
+        "social.text_placeholder": "Write your post here...",
+        "social.assist_label": "Need help writing?",
+        "social.assist_placeholder": "E.g. announce our weekend discount",
+        "social.assist_button": "Generate with AI",
+        "social.working": "Working...",
+        "social.image_label": "Post image (optional)",
+        "social.image_placeholder": "E.g. a sunny product photo",
+        "social.image_button": "Create image",
+        "social.remove_image": "Remove image",
+        "social.image_attached": "Image attached to this post.",
+        "social.localhost_warning": "Note: Buffer can only fetch the image once this app has a public address. Preview works regardless.",
+        "social.save_draft": "Save as draft",
+        "social.add_queue": "Add to queue",
+        "social.history": "Recent posts",
+        "social.no_posts": "No posts yet. Your drafts and queued posts will appear here.",
+        "social.key_missing": "Add your Buffer API key to publish.",
+        "social.key_missing_link": "Open Settings",
+        "social.preview_empty": "Your post preview will appear here.",
+        "social.preview_note": "Preview. Each network renders posts slightly differently.",
+        "social.published_ok": "Post added to the Buffer queue.",
+        "social.draft_ok": "Draft saved in Buffer.",
         "settings.client_id": "Client ID",
         "settings.client_secret": "Client Secret",
         "settings.redirect_uri": "Redirect URI",
         "settings.configured": "Configured",
         "settings.pending": "Pending",
         "settings.update": "Update settings",
-        "site.kicker": "Website operations",
-        "site.title": "Site Manager",
-        "site.directory": "Website directory",
-        "site.directory_note": "Enter the local website directory this account can manage. AI updates, backups, and the terminal stay inside this path.",
+        "site.kicker": "Workspace",
+        "site.title": "ONEBoard Studio",
+        "site.directory": "Project folder",
+        "site.directory_note": "Choose a folder for anything you want to create. If you do not choose one, ONEBoard creates a personal project folder automatically.",
         "site.directory_env_note": "The website directory is assigned by the developer for the selected Search Console property.",
         "site.path": "Directory path",
         "site.path_placeholder": "C:\\Sites\\example.com",
         "site.connect": "Connect directory",
+        "site.browse": "Browse",
+        "site.browser_title": "Choose a working folder",
+        "site.browser_up": "Up",
+        "site.browser_home": "Home",
+        "site.browser_empty": "No subfolders here.",
+        "site.browser_cannot_select": "This folder can't be used. Pick a subfolder instead.",
+        "site.use_folder": "Use this folder",
+        "site.browser_cancel": "Cancel",
         "site.connected": "Connected",
         "site.not_connected": "Not connected",
         "site.last_updated": "Last updated",
@@ -241,9 +290,10 @@ TRANSLATIONS = {
         "site.command": "Command",
         "site.command_placeholder": "nano index.html",
         "site.run_command": "Run command",
-        "site.codex_update": "Update website",
+        "site.ai_studio": "AI Project Studio",
+        "site.codex_update": "Create anything",
         "site.codex_prompt": "Message Muse",
-        "site.codex_prompt_placeholder": "Ask for the next website change...",
+        "site.codex_prompt_placeholder": "Describe what you want to create or change...",
         "site.codex_image": "Suggested image",
         "site.codex_image_note": "Optional. Muse will use this image only for this update request.",
         "site.asset_library": "Asset library",
@@ -252,10 +302,10 @@ TRANSLATIONS = {
         "site.use_asset": "Use image",
         "site.selected_asset": "Selected image",
         "site.quick_actions": "Quick actions",
-        "site.quick_hero": "Update hero",
-        "site.quick_section": "Add section",
-        "site.quick_cta": "Improve CTA",
-        "site.quick_landing": "Create landing",
+        "site.quick_hero": "Workspace README",
+        "site.quick_section": "Add file",
+        "site.quick_cta": "Review files",
+        "site.quick_landing": "New document",
         "site.seo_writer": "SEO writer",
         "site.seo_title": "Page title",
         "site.seo_keyword": "Keyword",
@@ -292,7 +342,7 @@ TRANSLATIONS = {
         "site.files": "Files",
         "site.output": "Output",
         "site.no_output": "Command finished without output.",
-        "site.terminal_ready": "Restricted terminal ready. Allowed tool: the platform editor.",
+        "site.terminal_ready": "Terminal ready. Commands run from your project folder.",
         "site.remote": "Remote deploy",
         "site.tab_studio": "Studio",
         "site.tab_files": "Files",
@@ -457,6 +507,16 @@ TRANSLATIONS = {
         "flash.site_path_required": "Enter a website directory path.",
         "flash.site_path_missing": "The directory does not exist.",
         "flash.site_path_not_directory": "The path is not a directory.",
+        "flash.site_path_create_failed": "Could not create the directory. Check the path and permissions.",
+        "flash.project_not_found": "Project not found.",
+        "site.projects": "Projects",
+        "site.projects_note": "Switch between working folders. Each one keeps its own chat, updates, and backups.",
+        "site.new_project": "New project",
+        "site.open_project": "Open",
+        "site.current_project": "Current",
+        "site.remove_project": "Remove",
+        "site.project_missing": "Folder missing",
+        "site.confirm_remove_project": "Remove this project from the list? Files on disk are kept.",
         "flash.site_path_unsafe": "Choose a dedicated website folder, not a system, home, or ONEBoard data directory.",
         "flash.site_connected": "Website directory connected.",
         "flash.site_directory_unmapped": "Connect a website directory first.",
@@ -502,8 +562,9 @@ TRANSLATIONS = {
     "es": {
         "nav.dashboard": "Dashboard",
         "nav.seo": "SEO",
-        "nav.site_manager": "Administrador del sitio",
+        "nav.site_manager": "Studio",
         "nav.security_scan": "Escaneo de seguridad",
+        "nav.social": "Redes",
         "nav.help": "Ayuda",
         "nav.settings": "Configuración",
         "nav.logout": "Salir",
@@ -583,24 +644,71 @@ TRANSLATIONS = {
         "settings.confirm_new_password": "Confirmar nueva contraseña",
         "settings.google_note": "La conexión con Google se gestiona de forma privada en el servidor. Usa el botón de conexión en el dashboard para autorizar tu cuenta de Search Console.",
         "settings.muse": "API de Muse",
-        "settings.muse_note": "Guarda aquí tu API key de Muse para que las actualizaciones con IA y la generación de imágenes se facturen a tu propia cuenta.",
+        "settings.muse_note": "Guarda aquí tu API key de Muse para que la creación de proyectos y la generación de imágenes usen tu propia cuenta.",
         "settings.muse_api_key": "API key de Muse",
         "settings.muse_api_key_placeholder": "Déjalo vacío para mantener la key guardada",
         "settings.muse_configured": "API key guardada",
+        "settings.buffer": "API de Buffer",
+        "settings.buffer_note": "Guarda aquí tu API key de Buffer para publicar contenido social en tus canales conectados.",
+        "settings.buffer_api_key": "API key de Buffer",
+        "settings.buffer_api_key_placeholder": "Déjalo vacío para mantener la key guardada",
+        "settings.buffer_configured": "API key guardada",
+        "social.buffer_key_required": "Agrega tu API key de Buffer en Ajustes para publicar contenido social.",
+        "social.channel_required": "Elige uno de tus canales de Buffer para esta publicación.",
+        "social.text_required": "Escribe el texto o describe qué generar.",
+        "social.prompt_required": "Describe de qué debe tratar la publicación.",
+        "social.image_url_invalid": "La URL de la imagen debe ser una dirección http(s) completa.",
+        "social.kicker": "Contenido social",
+        "social.title": "Crear publicaciones",
+        "social.composer": "Redactor",
+        "social.preview": "Vista previa",
+        "social.channel": "Canal",
+        "social.select_channel": "Elige un canal",
+        "social.loading_channels": "Cargando canales...",
+        "social.post_text": "Texto de la publicación",
+        "social.text_placeholder": "Escribe tu publicación aquí...",
+        "social.assist_label": "¿Ayuda para redactar?",
+        "social.assist_placeholder": "Ej. anunciar nuestro descuento de fin de semana",
+        "social.assist_button": "Generar con IA",
+        "social.working": "Trabajando...",
+        "social.image_label": "Imagen de la publicación (opcional)",
+        "social.image_placeholder": "Ej. foto soleada del producto",
+        "social.image_button": "Crear imagen",
+        "social.remove_image": "Quitar imagen",
+        "social.image_attached": "Imagen adjunta a esta publicación.",
+        "social.localhost_warning": "Nota: Buffer solo puede descargar la imagen cuando esta app tenga una dirección pública. La vista previa funciona igual.",
+        "social.save_draft": "Guardar borrador",
+        "social.add_queue": "Agregar a la cola",
+        "social.history": "Publicaciones recientes",
+        "social.no_posts": "Aún no hay publicaciones. Tus borradores y encolados aparecerán aquí.",
+        "social.key_missing": "Agrega tu API key de Buffer para publicar.",
+        "social.key_missing_link": "Abrir Ajustes",
+        "social.preview_empty": "Tu vista previa aparecerá aquí.",
+        "social.preview_note": "Vista previa. Cada red muestra las publicaciones un poco distinto.",
+        "social.published_ok": "Publicación agregada a la cola de Buffer.",
+        "social.draft_ok": "Borrador guardado en Buffer.",
         "settings.client_id": "Client ID",
         "settings.client_secret": "Client Secret",
         "settings.redirect_uri": "Redirect URI",
         "settings.configured": "Configurado",
         "settings.pending": "Pendiente",
         "settings.update": "Actualizar configuración",
-        "site.kicker": "Operaciones del website",
-        "site.title": "Administrador del sitio",
-        "site.directory": "Directorio del website",
-        "site.directory_note": "Ingresa el directorio local del website que esta cuenta puede administrar. Las actualizaciones con IA, backups y la terminal se mantienen dentro de esa ruta.",
+        "site.kicker": "Espacio de trabajo",
+        "site.title": "ONEBoard Studio",
+        "site.directory": "Carpeta del proyecto",
+        "site.directory_note": "Elige una carpeta para crear lo que quieras. Si no eliges ninguna, ONEBoard creará automáticamente una carpeta personal para tus proyectos.",
         "site.directory_env_note": "El directorio del website es asignado por el desarrollador para la propiedad seleccionada de Search Console.",
         "site.path": "Ruta del directorio",
         "site.path_placeholder": "C:\\Sites\\example.com",
         "site.connect": "Conectar directorio",
+        "site.browse": "Explorar",
+        "site.browser_title": "Elige una carpeta de trabajo",
+        "site.browser_up": "Subir",
+        "site.browser_home": "Inicio",
+        "site.browser_empty": "No hay subcarpetas aquí.",
+        "site.browser_cannot_select": "Esta carpeta no se puede usar. Elige una subcarpeta.",
+        "site.use_folder": "Usar esta carpeta",
+        "site.browser_cancel": "Cancelar",
         "site.connected": "Conectado",
         "site.not_connected": "No conectado",
         "site.last_updated": "Última actualización",
@@ -608,9 +716,10 @@ TRANSLATIONS = {
         "site.command": "Comando",
         "site.command_placeholder": "nano index.html",
         "site.run_command": "Ejecutar comando",
-        "site.codex_update": "Actualizar website",
+        "site.ai_studio": "Estudio de proyectos con IA",
+        "site.codex_update": "Crear cualquier cosa",
         "site.codex_prompt": "Mensaje para Muse",
-        "site.codex_prompt_placeholder": "Pide el próximo cambio del website...",
+        "site.codex_prompt_placeholder": "Describe qué quieres crear o cambiar...",
         "site.codex_image": "Imagen sugerida",
         "site.codex_image_note": "Opcional. Muse usará esta imagen solo para esta actualización.",
         "site.asset_library": "Biblioteca de assets",
@@ -619,10 +728,10 @@ TRANSLATIONS = {
         "site.use_asset": "Usar imagen",
         "site.selected_asset": "Imagen seleccionada",
         "site.quick_actions": "Acciones rápidas",
-        "site.quick_hero": "Actualizar hero",
-        "site.quick_section": "Agregar sección",
-        "site.quick_cta": "Mejorar CTA",
-        "site.quick_landing": "Crear landing",
+        "site.quick_hero": "README del espacio",
+        "site.quick_section": "Agregar archivo",
+        "site.quick_cta": "Revisar archivos",
+        "site.quick_landing": "Nuevo documento",
         "site.seo_writer": "Redactor SEO",
         "site.seo_title": "Título de página",
         "site.seo_keyword": "Keyword",
@@ -659,7 +768,7 @@ TRANSLATIONS = {
         "site.files": "Archivos",
         "site.output": "Salida",
         "site.no_output": "El comando terminó sin salida.",
-        "site.terminal_ready": "Terminal restringida lista. Herramienta permitida: el editor de la plataforma.",
+        "site.terminal_ready": "Terminal lista. Los comandos se ejecutan desde la carpeta del proyecto.",
         "site.remote": "Deploy remoto",
         "site.tab_studio": "Studio",
         "site.tab_files": "Archivos",
@@ -824,6 +933,16 @@ TRANSLATIONS = {
         "flash.site_path_required": "Ingresa la ruta del directorio del website.",
         "flash.site_path_missing": "El directorio no existe.",
         "flash.site_path_not_directory": "La ruta no es un directorio.",
+        "flash.site_path_create_failed": "No se pudo crear el directorio. Revisa la ruta y los permisos.",
+        "flash.project_not_found": "Proyecto no encontrado.",
+        "site.projects": "Proyectos",
+        "site.projects_note": "Cambia entre carpetas de trabajo. Cada una conserva su chat, actualizaciones y respaldos.",
+        "site.new_project": "Nuevo proyecto",
+        "site.open_project": "Abrir",
+        "site.current_project": "Actual",
+        "site.remove_project": "Quitar",
+        "site.project_missing": "Carpeta no encontrada",
+        "site.confirm_remove_project": "¿Quitar este proyecto de la lista? Los archivos se conservan.",
         "flash.site_path_unsafe": "Selecciona una carpeta dedicada al website, no una carpeta del sistema, de inicio o de datos de ONEBoard.",
         "flash.site_connected": "Directorio del website conectado.",
         "flash.site_directory_unmapped": "Conecta primero un directorio del website.",
@@ -1360,6 +1479,7 @@ def create_app():
     @app.route("/api/site-manager")
     @login_required
     def api_site_manager():
+        ensure_default_site_directory(g.user["id"])
         return jsonify({"ok": True, "manager": to_jsonable(build_site_manager(g.user["id"]))})
 
     @app.route("/api/site-manager/connect", methods=("POST",))
@@ -1368,10 +1488,61 @@ def create_app():
         data = request_payload()
         try:
             with site_operation_lock(g.user["id"]):
-                connect_site_directory(g.user["id"], (data.get("path") or "").strip())
+                path = (data.get("path") or "").strip()
+                if path:
+                    connect_site_directory(g.user["id"], path)
+                else:
+                    ensure_default_site_directory(g.user["id"])
         except ValueError as error:
             return api_error(str(error), 400)
         return jsonify({"ok": True, "manager": to_jsonable(build_site_manager(g.user["id"]))})
+
+    @app.route("/api/site-manager/browse-directory")
+    @login_required
+    def api_site_manager_browse_directory():
+        try:
+            listing = browse_local_directories(request.args.get("path", ""))
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "listing": listing})
+
+    @app.route("/api/site-manager/projects/remove", methods=("POST",))
+    @login_required
+    def api_site_manager_remove_project():
+        data = request_payload()
+        try:
+            project_id = int(str(data.get("project_id") or "").strip())
+        except (TypeError, ValueError):
+            return api_error(translate("flash.project_not_found"), 400)
+        try:
+            with site_operation_lock(g.user["id"]):
+                remove_site_project(g.user["id"], project_id)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "manager": to_jsonable(build_site_manager(g.user["id"]))})
+
+    @app.route("/api/site-manager/files/raw")
+    @login_required
+    def api_site_manager_file_raw():
+        file_path = request.args.get("path", "").strip()
+        try:
+            absolute_path = resolve_site_file(g.user["id"], file_path)
+        except ValueError:
+            return api_error(translate("flash.site_path_missing"), 404)
+        if not os.path.isfile(absolute_path):
+            return api_error(translate("flash.site_path_missing"), 404)
+        return send_file(absolute_path, mimetype=mimetypes.guess_type(absolute_path)[0] or "application/octet-stream")
+
+    @app.route("/api/site-manager/assets/raw")
+    @login_required
+    def api_site_manager_asset_raw():
+        asset_path = request.args.get("path", "").strip()
+        try:
+            validate_asset_path(g.user["id"], asset_path)
+            absolute_path = resolve_site_file(g.user["id"], asset_path, allow_oneboard=True)
+        except ValueError:
+            return api_error(translate("flash.site_path_missing"), 404)
+        return send_file(absolute_path, mimetype=mimetypes.guess_type(absolute_path)[0] or "application/octet-stream")
 
     @app.route("/api/site-manager/remote", methods=("POST",))
     @login_required
@@ -1627,6 +1798,85 @@ def create_app():
             }
         )
 
+    @app.route("/api/social/buffer/channels")
+    @login_required
+    def api_social_buffer_channels():
+        api_key = get_user_buffer_api_key(g.user["id"])
+        if not api_key:
+            return api_error(translate("social.buffer_key_required"), 400)
+        try:
+            channels = list_buffer_channels(api_key)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "channels": channels})
+
+    @app.route("/api/social/buffer/posts")
+    @login_required
+    def api_social_buffer_history():
+        return jsonify({"ok": True, "posts": to_jsonable(list_social_posts(g.user["id"]))})
+
+    @app.route("/api/social/generate", methods=("POST",))
+    @login_required
+    def api_social_generate():
+        data = request.get_json(silent=True) or {}
+        prompt = (data.get("prompt") or "").strip()
+        provider = (data.get("provider") or "").strip().lower() or None
+        model = (data.get("model") or "").strip() or None
+        if not prompt:
+            return api_error(translate("social.prompt_required"), 400)
+        try:
+            run = run_ai_text_task(g.user["id"], "social_post", prompt, provider=provider, model=model)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "text": (run["response_text"] or "").strip()})
+
+    @app.route("/api/social/buffer/posts", methods=("POST",))
+    @login_required
+    def api_social_buffer_create_post():
+        data = request.get_json(silent=True) or {}
+        channel_id = (data.get("channel_id") or "").strip()
+        text = (data.get("text") or "").strip()
+        prompt = (data.get("prompt") or "").strip()
+        image_url = (data.get("image_url") or "").strip()
+        draft = bool(data.get("draft", False))
+        provider = (data.get("provider") or "").strip().lower() or None
+        model = (data.get("model") or "").strip() or None
+        api_key = get_user_buffer_api_key(g.user["id"])
+        if not api_key:
+            return api_error(translate("social.buffer_key_required"), 400)
+        if not channel_id:
+            return api_error(translate("social.channel_required"), 400)
+        if image_url:
+            parsed_url = urllib.parse.urlparse(image_url)
+            if parsed_url.scheme not in ("http", "https") or not parsed_url.netloc:
+                return api_error(translate("social.image_url_invalid"), 400)
+        if not text:
+            if not prompt:
+                return api_error(translate("social.text_required"), 400)
+            try:
+                run = run_ai_text_task(g.user["id"], "social_post", prompt, provider=provider, model=model)
+            except ValueError as error:
+                return api_error(str(error), 400)
+            text = (run["response_text"] or "").strip()
+            if not text:
+                return api_error(translate("social.text_required"), 400)
+        try:
+            channels = list_buffer_channels(api_key)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        channel = next((item for item in channels if item["id"] == channel_id), None)
+        if channel is None:
+            return api_error(translate("social.channel_required"), 400)
+        try:
+            post = create_buffer_post(api_key, channel_id, text, draft=draft, image_url=image_url or None)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        status = "draft" if draft else "queued"
+        record_social_post(g.user["id"], channel_id, channel["name"], text, status, post["id"], image_url or None)
+        return jsonify(
+            {"ok": True, "post": post, "status": status, "posts": to_jsonable(list_social_posts(g.user["id"]))}
+        )
+
     @app.route("/api/site-manager/assets/upload", methods=("POST",))
     @login_required
     def api_site_manager_asset_upload():
@@ -1766,48 +2016,73 @@ def create_app():
     @app.route("/api/settings/account", methods=("POST",))
     @login_required
     def api_settings_account():
-        data = request.get_json(silent=True) or {}
+        data = request_payload()
         user = get_user_account(g.user["id"])
         name = (data.get("name") or user["name"]).strip()
-        company_name = (data.get("company_name") or "").strip()
-        company_email = (data.get("company_email") or "").strip()
-        company_website = (data.get("company_website") or "").strip()
+        email = (data.get("email") or user["email"]).strip().lower()
+        company_name = (data.get("company_name") or user["company_name"] or "").strip()
+        company_email = (data.get("company_email") or user["company_email"] or "").strip()
+        company_website = (data.get("company_website") or user["company_website"] or "").strip()
+        buffer_api_key = (data.get("buffer_api_key") or "").strip()
         new_password = data.get("new_password") or ""
         confirm_password = data.get("confirm_password") or ""
         current_password = data.get("current_password") or ""
 
         if not name:
             return api_error(translate("flash.name_required"), 400)
+        if not email or "@" not in email:
+            return api_error(translate("flash.email_invalid"), 400)
+        changing_sensitive_fields = email != user["email"] or bool(new_password)
+        if changing_sensitive_fields and not verify_password(user["password_hash"], current_password):
+            return api_error(translate("flash.current_password_invalid"), 401)
         if new_password or confirm_password:
-            if not verify_password(user["password_hash"], current_password):
-                return api_error(translate("flash.current_password_invalid"), 401)
             if len(new_password) < 8 or new_password != confirm_password:
                 return api_error(translate("flash.password_update_mismatch"), 400)
+
+        avatar_path = user["avatar_path"]
+        avatar = request.files.get("avatar")
+        if avatar and avatar.filename:
+            try:
+                avatar_path = save_uploaded_image(g.user["id"], avatar, AVATAR_DIR, "user")
+            except ValueError as error:
+                return api_error(str(error), 400)
+
+        company_logo_path = user["company_logo_path"]
+        company_logo = request.files.get("company_logo")
+        if company_logo and company_logo.filename:
+            try:
+                company_logo_path = save_uploaded_image(
+                    g.user["id"], company_logo, COMPANY_LOGO_DIR, "company"
+                )
+            except ValueError as error:
+                return api_error(str(error), 400)
+
+        password_hash = hash_password(new_password) if new_password else user["password_hash"]
+        try:
             execute_db(
                 """
                 UPDATE users
-                SET name = ?, company_name = ?, company_email = ?, company_website = ?,
-                    password_hash = ?
+                SET name = ?, email = ?, password_hash = ?, avatar_path = ?,
+                    company_name = ?, company_email = ?, company_website = ?,
+                    company_logo_path = ?,
+                    buffer_api_key = COALESCE(NULLIF(?, ''), buffer_api_key)
                 WHERE id = ?
                 """,
                 (
                     name,
+                    email,
+                    password_hash,
+                    avatar_path,
                     company_name,
                     company_email,
                     company_website,
-                    hash_password(new_password),
+                    company_logo_path,
+                    buffer_api_key,
                     g.user["id"],
                 ),
             )
-        else:
-            execute_db(
-                """
-                UPDATE users
-                SET name = ?, company_name = ?, company_email = ?, company_website = ?
-                WHERE id = ?
-                """,
-                (name, company_name, company_email, company_website, g.user["id"]),
-            )
+        except sqlite3.IntegrityError:
+            return api_error(translate("flash.account_exists"), 400)
         return jsonify({"ok": True, "account": public_user(get_user_account(g.user["id"]))})
 
     @app.route("/api/ai/providers")
@@ -1925,6 +2200,14 @@ def create_app():
             return api_error(str(error), 400)
         return jsonify({"ok": True, "models": models})
 
+    @app.route("/social")
+    @login_required
+    def social():
+        return render_template(
+            "social.html",
+            buffer_configured=bool(get_user_buffer_api_key(g.user["id"])),
+        )
+
     @app.route("/help")
     @login_required
     def help_page():
@@ -1933,6 +2216,7 @@ def create_app():
     @app.route("/site-manager")
     @login_required
     def site_manager():
+        ensure_default_site_directory(g.user["id"])
         manager = build_site_manager(g.user["id"])
         return render_template("site_manager.html", manager=manager, terminal=None, command="")
 
@@ -2227,6 +2511,7 @@ def create_app():
             company_email = request.form.get("company_email", "").strip().lower()
             company_website = request.form.get("company_website", "").strip()
             muse_api_key = request.form.get("muse_api_key", "").strip()
+            buffer_api_key = request.form.get("buffer_api_key", "").strip()
             avatar = request.files.get("avatar")
             company_logo = request.files.get("company_logo")
             account = get_user_account(g.user["id"])
@@ -2291,7 +2576,8 @@ def create_app():
                     SET name = ?, email = ?, password_hash = ?, avatar_path = ?,
                         company_name = ?, company_email = ?, company_website = ?,
                         company_logo_path = ?,
-                        muse_api_key = COALESCE(NULLIF(?, ''), muse_api_key)
+                        muse_api_key = COALESCE(NULLIF(?, ''), muse_api_key),
+                        buffer_api_key = COALESCE(NULLIF(?, ''), buffer_api_key)
                     WHERE id = ?
                     """,
                     (
@@ -2304,6 +2590,7 @@ def create_app():
                         company_website,
                         company_logo_path,
                         muse_api_key,
+                        buffer_api_key,
                         g.user["id"],
                     ),
                 )
@@ -2495,6 +2782,7 @@ def public_user(user):
         "anthropic_api_key_configured": bool(user["anthropic_api_key"]) if "anthropic_api_key" in user.keys() else False,
         "openrouter_api_key_configured": bool(user["openrouter_api_key"]) if "openrouter_api_key" in user.keys() else False,
         "google_api_key_configured": bool(user["google_api_key"]) if "google_api_key" in user.keys() else False,
+        "buffer_api_key_configured": bool(user["buffer_api_key"]) if "buffer_api_key" in user.keys() else False,
         "ai_default_provider": user["ai_default_provider"] if "ai_default_provider" in user.keys() else DEFAULT_AI_PROVIDER,
         "ai_default_model": user["ai_default_model"] if "ai_default_model" in user.keys() else "",
         "created_at": user["created_at"],
@@ -2531,6 +2819,7 @@ def init_db():
             anthropic_api_key TEXT,
             openrouter_api_key TEXT,
             google_api_key TEXT,
+            buffer_api_key TEXT,
             ai_default_provider TEXT NOT NULL DEFAULT 'muse',
             ai_default_model TEXT,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -2548,6 +2837,7 @@ def init_db():
     ensure_column("users", "anthropic_api_key", "TEXT")
     ensure_column("users", "openrouter_api_key", "TEXT")
     ensure_column("users", "google_api_key", "TEXT")
+    ensure_column("users", "buffer_api_key", "TEXT")
     ensure_column("users", "ai_default_provider", "TEXT NOT NULL DEFAULT 'muse'")
     ensure_column("users", "ai_default_model", "TEXT")
     db.execute(
@@ -2624,6 +2914,19 @@ def init_db():
             path TEXT NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS website_workspaces (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            path TEXT NOT NULL,
+            last_opened_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (user_id, path),
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
         """
@@ -2709,11 +3012,30 @@ def init_db():
             content TEXT NOT NULL,
             raw_output TEXT,
             exit_code TEXT,
+            directory_path TEXT,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
         """
     )
+    ensure_column("website_codex_messages", "directory_path", "TEXT")
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS social_posts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            channel_id TEXT NOT NULL,
+            channel_name TEXT NOT NULL DEFAULT '',
+            text TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            buffer_post_id TEXT,
+            image_url TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+        """
+    )
+    ensure_column("social_posts", "image_url", "TEXT")
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS security_scan_history (
@@ -2783,6 +3105,7 @@ def get_user_account(user_id):
         SELECT id, name, email, password_hash, email_verified, avatar_path, company_name,
                company_email, company_website, company_logo_path,
                muse_api_key, muse_models_json, anthropic_api_key, openrouter_api_key, google_api_key,
+               buffer_api_key,
                ai_default_provider, ai_default_model,
                created_at
         FROM users
@@ -3322,6 +3645,7 @@ def build_site_manager(user_id):
     return {
         "directory": directory,
         "directory_managed_by_env": False,
+        "projects": list_site_projects(user_id),
         "backups": list_site_backups(user_id),
         "codex_messages": list_codex_messages(user_id),
         "remote_connection": get_remote_connection(user_id),
@@ -3335,15 +3659,7 @@ def build_site_manager(user_id):
 
 
 @locked_site_operation
-def connect_site_directory(user_id, path):
-    if not path:
-        raise ValueError(translate("flash.site_path_required"))
-
-    normalized_path = os.path.realpath(os.path.abspath(os.path.expanduser(path)))
-    if not os.path.exists(normalized_path):
-        raise ValueError(translate("flash.site_path_missing"))
-    if not os.path.isdir(normalized_path):
-        raise ValueError(translate("flash.site_path_not_directory"))
+def validate_site_directory_selection(normalized_path):
     app_data_path = os.path.realpath(APP_DATA_DIR)
     home_path = os.path.realpath(os.path.expanduser("~"))
     filesystem_root = os.path.realpath(os.path.abspath(os.sep))
@@ -3353,7 +3669,88 @@ def connect_site_directory(user_id, path):
     ):
         raise ValueError(translate("flash.site_path_unsafe"))
 
+
+def clean_manual_directory_path(path):
+    cleaned = (path or "").strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {"'", '"'}:
+        cleaned = cleaned[1:-1].strip()
+    return cleaned.replace("\\ ", " ")
+
+
+def connect_site_directory(user_id, path):
+    cleaned_path = clean_manual_directory_path(path)
+    if not cleaned_path:
+        raise ValueError(translate("flash.site_path_required"))
+
+    normalized_path = os.path.realpath(os.path.abspath(os.path.expanduser(cleaned_path)))
+    validate_site_directory_selection(normalized_path)
+    if not os.path.exists(normalized_path):
+        try:
+            os.makedirs(normalized_path, exist_ok=True)
+        except OSError:
+            raise ValueError(translate("flash.site_path_create_failed"))
+    if not os.path.isdir(normalized_path):
+        raise ValueError(translate("flash.site_path_not_directory"))
+
     store_site_directory(user_id, normalized_path)
+
+
+@locked_site_operation
+def ensure_default_site_directory(user_id):
+    """Give each account a usable project folder when it has not selected one."""
+    directory = get_site_directory(user_id)
+    if directory and os.path.isdir(directory["path"]):
+        return directory
+    default_path = os.path.join(
+        os.path.expanduser("~"), "ONEBoard Projects", f"project-{user_id}"
+    )
+    connect_site_directory(user_id, default_path)
+    return get_site_directory(user_id)
+
+
+def browse_local_directories(path):
+    start = (path or "").strip() or os.path.expanduser("~")
+    normalized_path = os.path.realpath(os.path.abspath(os.path.expanduser(start)))
+    if not os.path.exists(normalized_path):
+        raise ValueError(translate("flash.site_path_missing"))
+    if not os.path.isdir(normalized_path):
+        raise ValueError(translate("flash.site_path_not_directory"))
+    app_data_path = os.path.realpath(APP_DATA_DIR)
+    if normalized_path == app_data_path or path_is_inside(app_data_path, normalized_path):
+        raise ValueError(translate("flash.site_path_unsafe"))
+
+    entries = []
+    try:
+        with os.scandir(normalized_path) as iterator:
+            for entry in iterator:
+                try:
+                    if not entry.is_dir(follow_symlinks=False):
+                        continue
+                    entry_real = os.path.realpath(entry.path)
+                    if entry_real == app_data_path or path_is_inside(app_data_path, entry_real):
+                        continue
+                except OSError:
+                    continue
+                if entry.name.startswith("."):
+                    continue
+                entries.append({"name": entry.name, "path": entry_real})
+    except OSError as error:
+        raise ValueError(translate("flash.site_path_missing")) from error
+    entries.sort(key=lambda item: item["name"].casefold())
+
+    filesystem_root = os.path.realpath(os.path.abspath(os.sep))
+    try:
+        validate_site_directory_selection(normalized_path)
+        can_select = True
+    except ValueError:
+        can_select = False
+    return {
+        "current": normalized_path,
+        "parent": os.path.dirname(normalized_path) if normalized_path != filesystem_root else None,
+        "home": os.path.realpath(os.path.expanduser("~")),
+        "can_select": can_select,
+        "entries": entries,
+    }
 
 
 def store_site_directory(user_id, normalized_path):
@@ -3367,6 +3764,60 @@ def store_site_directory(user_id, normalized_path):
         """,
         (user_id, normalized_path),
     )
+    execute_db(
+        """
+        INSERT INTO website_workspaces (user_id, path, last_opened_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, path) DO UPDATE SET
+            last_opened_at = CURRENT_TIMESTAMP
+        """,
+        (user_id, normalized_path),
+    )
+
+
+def list_site_projects(user_id):
+    directory = get_site_directory(user_id)
+    current = os.path.realpath(directory["path"]) if directory else None
+    rows = query_db(
+        """
+        SELECT id, path, last_opened_at
+        FROM website_workspaces
+        WHERE user_id = ?
+        ORDER BY last_opened_at DESC, id DESC
+        """,
+        (user_id,),
+    )
+    projects = []
+    for row in rows:
+        path = row["path"]
+        projects.append(
+            {
+                "id": row["id"],
+                "path": path,
+                "name": os.path.basename(path.rstrip(os.sep)) or path,
+                "is_current": current is not None and os.path.realpath(path) == current,
+                "exists": os.path.isdir(path),
+                "last_opened_at": row["last_opened_at"],
+            }
+        )
+    return projects
+
+
+def remove_site_project(user_id, project_id):
+    row = query_db(
+        "SELECT id, path FROM website_workspaces WHERE id = ? AND user_id = ?",
+        (project_id, user_id),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.project_not_found"))
+    execute_db(
+        "DELETE FROM website_workspaces WHERE id = ? AND user_id = ?",
+        (project_id, user_id),
+    )
+    directory = get_site_directory(user_id)
+    if directory and os.path.realpath(directory["path"]) == os.path.realpath(row["path"]):
+        execute_db("DELETE FROM website_directories WHERE user_id = ?", (user_id,))
 
 
 def connect_managed_remote_workspace(user_id, workspace_path, remote):
@@ -4288,28 +4739,17 @@ def run_site_terminal_command(user_id, command):
     directory = require_site_directory(user_id)
     started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     workspace_path = directory["path"]
-    command_env = build_site_command_env(workspace_path)
-    command_args = sandboxed_tool_command(workspace_path, command)
-    timeout = site_command_timeout()
-    try:
-        completed = subprocess.run(
-            command_args,
-            cwd=workspace_path,
-            env=command_env,
-            text=True,
-            input="",
-            capture_output=True,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as error:
-        output = decode_process_output(error.stdout) + decode_process_output(error.stderr)
-        return {
-            "command": command,
-            "cwd": workspace_path,
-            "exit_code": "timeout",
-            "output": output.strip() or translate("flash.command_timeout"),
-            "started_at": started_at,
-        }
+    command_env = os.environ.copy()
+    command_env["PWD"] = workspace_path
+    completed = subprocess.run(
+        command,
+        cwd=workspace_path,
+        env=command_env,
+        shell=True,
+        text=True,
+        input="",
+        capture_output=True,
+    )
 
     output = "\n".join(part for part in (completed.stdout, completed.stderr) if part).strip()
     return {
@@ -4335,15 +4775,15 @@ def run_site_codex_update(user_id, prompt, suggested_image_path=None, provider=N
     if unsafe_symlink:
         raise ValueError(translate("site.unsafe_symlink", path=unsafe_symlink))
     snapshot_path = create_update_snapshot(user_id, workspace_path)
-    save_codex_message(user_id, "user", prompt)
-    guarded_prompt = build_design_preserving_codex_prompt(prompt, suggested_image_path)
+    save_codex_message(user_id, "user", prompt, directory_path=workspace_path)
+    guarded_prompt = build_workspace_update_prompt(prompt, suggested_image_path)
     result = run_site_ai_fallback_update(user_id, workspace_path, guarded_prompt, provider, model)
     history_source = f"ai-direct:{provider}"
     reply = result.get("reply") or result.get("output") or ""
     after_manifest = build_workspace_manifest(workspace_path)
     changed_files = compare_workspace_manifests(before_manifest, after_manifest)
     diff_summary = build_update_diff_summary(workspace_path, snapshot_path, changed_files)
-    save_codex_message(user_id, "assistant", reply, result["output"], result["exit_code"])
+    save_codex_message(user_id, "assistant", reply, result["output"], result["exit_code"], workspace_path)
     unsafe_symlink = find_unsafe_workspace_symlink(workspace_path, after_manifest)
     succeeded = str(result["exit_code"]) == "0" and not unsafe_symlink
     history_exit_code = result["exit_code"] if not unsafe_symlink else "unsafe-symlink"
@@ -4406,52 +4846,41 @@ def run_site_ai_fallback_update(user_id, workspace_path, prompt, provider, model
 
 def collect_site_edit_context(workspace_path, max_files=8, max_chars=24000):
     candidates = []
-    priority_names = {
-        "index.html": 0,
-        "home.html": 1,
-        "styles.css": 2,
-        "style.css": 3,
-        "main.css": 4,
-        "app.js": 5,
-        "main.js": 6,
-    }
     for root, dirs, files in os.walk(workspace_path, followlinks=False):
         dirs[:] = [item for item in dirs if not is_reserved_site_component(item) and not os.path.islink(os.path.join(root, item))]
         for file_name in files:
             source_path = os.path.join(root, file_name)
             if is_reserved_site_component(file_name) or os.path.islink(source_path):
                 continue
-            if not is_text_file(source_path) or not path_is_inside(workspace_path, source_path):
+            if not path_is_inside(workspace_path, source_path):
                 continue
             relative_path = os.path.relpath(source_path, workspace_path).replace("\\", "/")
             try:
                 size = os.path.getsize(source_path)
             except OSError:
                 continue
-            priority = priority_names.get(file_name.lower(), 50)
-            if relative_path.endswith(".html"):
-                priority -= 10
-            elif relative_path.endswith(".css"):
-                priority -= 5
-            candidates.append((priority, size, relative_path, source_path))
+            if size > 262144:
+                continue
+            candidates.append((size, relative_path, source_path))
 
     selected = []
     consumed = 0
-    for _priority, _size, relative_path, source_path in sorted(candidates, key=lambda item: (item[0], item[1], item[2])):
+    for _size, relative_path, source_path in sorted(candidates, key=lambda item: (item[0], item[1])):
         if len(selected) >= max_files or consumed >= max_chars:
             break
         try:
-            with open(source_path, "r", encoding="utf-8", errors="replace") as file:
-                content = file.read(min(8000, max_chars - consumed))
+            with open(source_path, "rb") as file:
+                raw = file.read(min(8000, max_chars - consumed))
         except OSError:
             continue
+        if b"\x00" in raw:
+            continue
+        content = raw.decode("utf-8", errors="replace")
         if not content.strip():
             continue
         consumed += len(content)
         selected.append({"path": relative_path, "content": content})
 
-    if not selected:
-        raise ValueError("No editable text files were found in the connected website directory.")
     return selected
 
 
@@ -4461,14 +4890,14 @@ def build_site_direct_edit_instruction(prompt, site_context):
         files_description.append(
             f"FILE: {item['path']}\n---BEGIN CONTENT---\n{item['content']}\n---END CONTENT---"
         )
-    joined_files = "\n\n".join(files_description)
+    joined_files = "\n\n".join(files_description) or "(The workspace is empty. Create whatever the request needs.)"
     return f"""
-You are editing a customer's website directly. Use only the files provided below as context.
+You are a file assistant working inside the user's connected workspace. You can create new files and edit existing ones: documents, notes, code, configs, web pages, or anything else the user asks for.
 
 Requirements:
-- Preserve the site's current visual identity and structure.
-- Change only files that are necessary for the user's request.
-- Stay inside the website workspace.
+- Create or update exactly the files the user's request needs. You may create new files, including inside new subfolders.
+- Use relative paths inside the workspace only. Never use absolute paths or parent ("..") references.
+- Stay inside the workspace.
 - Return valid JSON only, with no markdown fences.
 - JSON schema:
   {{
@@ -4478,12 +4907,12 @@ Requirements:
     ]
   }}
 - Every file entry must contain the full replacement content for that file.
-- Do not include binary files.
+- Text content only. Do not include binary files.
 
 User request:
 {prompt}
 
-Available files:
+Existing files:
 {joined_files}
 """.strip()
 
@@ -4519,7 +4948,7 @@ def apply_site_ai_update_plan(workspace_path, plan):
             or contains_parent_reference(relative_path)
             or relative_path_has_reserved_component(relative_path)
             or not isinstance(content, str)
-            or not is_text_file(relative_path)
+            or is_blocked_update_extension(relative_path)
         ):
             raise ValueError("The AI provider returned an unsafe file update.")
         path_key = relative_path.casefold()
@@ -4539,7 +4968,7 @@ def apply_site_ai_update_plan(workspace_path, plan):
         raise ValueError("The AI provider did not propose any file changes.")
 
 
-def build_design_preserving_codex_prompt(prompt, suggested_image_path=None):
+def build_workspace_update_prompt(prompt, suggested_image_path=None):
     image_instruction = ""
     if suggested_image_path:
         image_instruction = f"""
@@ -4547,19 +4976,18 @@ def build_design_preserving_codex_prompt(prompt, suggested_image_path=None):
 User-provided image:
 - The user uploaded an image for this update at: {suggested_image_path}
 - Use this image only if it helps satisfy the user's request.
-- If you use it in the public website, copy it into the site's normal public assets/images location and reference that public copy.
+- If you reference it from created files, copy it into the workspace's normal assets/images location and reference that copy.
 - Do not use unrelated generated or stock imagery when this uploaded image is clearly intended for the requested update.
 """.rstrip()
 
     return f"""
-You are editing a customer's website. Before changing files, inspect the existing website structure and visual design.
+You are working inside the user's selected directory. You can create new files and edit existing ones: documents, notes, code, configs, web pages, or anything else requested.
 
 Rules:
-- Stay strictly inside the selected website directory.
-- Read the existing HTML, CSS, assets, navigation, footer, and component patterns before creating or editing pages.
-- Preserve the original visual identity. New pages must look like they belong to the same site.
-- Reuse existing CSS/classes/assets whenever possible.
-- Do not replace the site with a different theme or unrelated layout.
+- Stay strictly inside the selected directory.
+- Inspect the existing files first when the request refers to them.
+- Create new files or edit existing ones as the request needs, using relative paths.
+- Match existing conventions (format, style, structure) when editing files that already exist.
 {image_instruction}
 
 User request:
@@ -4587,32 +5015,47 @@ Requirements:
 
 def build_quick_prompts():
     return {
-        "hero": "Update the homepage hero section with stronger positioning, clearer value proposition, and a more direct call to action. Preserve the existing design system.",
-        "section": "Add a new useful content section to the most appropriate page. Match the current layout, spacing, typography, and navigation patterns.",
-        "cta": "Improve the primary call to action across the page so it is clearer, more specific, and easier to act on without changing the site's visual identity.",
-        "landing": "Create a focused landing page for a core service using the site's existing components, navigation, footer, and CSS patterns.",
+        "hero": "Create a README.md file that describes this workspace: what each file is for and how everything is organized.",
+        "section": "Add a useful new file to this workspace based on what already exists. Pick the most helpful format for its content.",
+        "cta": "Review every file in this workspace and fix small mistakes, typos, and inconsistencies.",
+        "landing": "Create a new markdown document with practical content related to this workspace.",
     }
 
 
-def save_codex_message(user_id, role, content, raw_output=None, exit_code=None):
+def save_codex_message(user_id, role, content, raw_output=None, exit_code=None, directory_path=None):
     execute_db(
         """
-        INSERT INTO website_codex_messages (user_id, role, content, raw_output, exit_code)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO website_codex_messages (user_id, role, content, raw_output, exit_code, directory_path)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (user_id, role, content, raw_output, str(exit_code) if exit_code is not None else None),
+        (
+            user_id,
+            role,
+            content,
+            raw_output,
+            str(exit_code) if exit_code is not None else None,
+            directory_path,
+        ),
     )
 
 
 def list_codex_messages(user_id):
+    directory = get_site_directory(user_id)
+    if not directory:
+        return []
+    current = os.path.realpath(directory["path"])
+    execute_db(
+        "UPDATE website_codex_messages SET directory_path = ? WHERE user_id = ? AND directory_path IS NULL",
+        (current, user_id),
+    )
     return query_db(
         """
         SELECT id, role, content, exit_code, created_at
         FROM website_codex_messages
-        WHERE user_id = ?
+        WHERE user_id = ? AND directory_path = ?
         ORDER BY id ASC
         """,
-        (user_id,),
+        (user_id, current),
     )
 
 
@@ -5079,10 +5522,28 @@ def is_previewable_file(path):
 
 def is_text_file(path):
     text_extensions = {
-        ".css", ".csv", ".htm", ".html", ".js", ".json", ".md", ".php", ".py",
-        ".txt", ".xml", ".yml", ".yaml",
+        ".c", ".cfg", ".cpp", ".css", ".csv", ".go", ".h", ".hpp", ".htm",
+        ".html", ".ini", ".java", ".js", ".json", ".jsx", ".kt", ".log",
+        ".lua", ".md", ".php", ".pl", ".py", ".r", ".rb", ".rs", ".scala",
+        ".sh", ".sql", ".swift", ".tex", ".toml", ".ts", ".tsx", ".txt",
+        ".vue", ".xml", ".yml", ".yaml",
     }
     return os.path.splitext(path)[1].lower() in text_extensions
+
+
+def is_blocked_update_extension(path):
+    # The chatbot writes text content, so paths with a binary-only extension
+    # would produce corrupt files. Everything else (including new or
+    # extension-less names such as Dockerfile) is allowed inside the workspace.
+    blocked_extensions = {
+        ".7z", ".a", ".avi", ".bin", ".bmp", ".bz2", ".db", ".dll", ".doc",
+        ".docx", ".dylib", ".exe", ".flac", ".gif", ".gz", ".ico", ".jpeg",
+        ".jpg", ".lib", ".mkv", ".mov", ".mp3", ".mp4", ".o", ".obj", ".otf",
+        ".pdf", ".png", ".ppt", ".pptx", ".rar", ".so", ".sqlite", ".sqlite3",
+        ".tar", ".tgz", ".tiff", ".ttf", ".wav", ".webp", ".woff", ".woff2",
+        ".xls", ".xlsx", ".xz", ".zip",
+    }
+    return os.path.splitext(path)[1].lower() in blocked_extensions
 
 
 def list_site_assets(user_id):
@@ -5435,6 +5896,12 @@ def build_ai_task_prompt(task_type, prompt, context=""):
             "Create a practical website content brief with audience, structure, messaging angles, objections, and CTA guidance."
             f"\n\nUser request:\n{prompt.strip()}{context_block}"
         )
+    if task_type == "social_post":
+        return (
+            "Write a single ready-to-publish social media post. Keep it concise, natural, and specific; "
+            "avoid hashtags unless they clearly help. Return only the post text, with no quotes or preamble."
+            f"\n\nUser request:\n{prompt.strip()}{context_block}"
+        )
     return f"{prompt.strip()}{context_block}"
 
 
@@ -5502,6 +5969,15 @@ def parse_google_response(payload):
 
 
 def parse_muse_response(payload):
+    if not isinstance(payload, dict):
+        return "", {}
+    error = payload.get("error")
+    if isinstance(error, dict):
+        raise ValueError(
+            error.get("message") or error.get("code") or "Muse API request failed."
+        )
+    if isinstance(error, str) and error.strip():
+        raise ValueError(error.strip())
     text = payload.get("output_text") or ""
     if not text:
         for item in payload.get("output", []) or []:
@@ -5513,8 +5989,29 @@ def parse_muse_response(payload):
                 candidate = content.get("text") or content.get("output_text") or ""
                 if candidate:
                     text += candidate
+    if not text:
+        for choice in payload.get("choices", []) or []:
+            if not isinstance(choice, dict):
+                continue
+            message = choice.get("message") or {}
+            content = message.get("content") or ""
+            if isinstance(content, str) and content.strip():
+                text += content
     usage = payload.get("usage") or {}
     return text.strip(), usage
+
+
+def describe_empty_provider_response(provider, response):
+    if not isinstance(response, dict) or not response:
+        return ""
+    status = response.get("status") or response.get("state") or ""
+    keys = ", ".join(sorted(str(key) for key in response.keys())[:12])
+    detail = f" (provider '{provider}'"
+    if status:
+        detail += f", status '{status}'"
+    if keys:
+        detail += f", fields: {keys}"
+    return detail + ")"
 
 
 def parse_muse_models(payload):
@@ -5588,7 +6085,10 @@ def save_muse_models_cache(user_id, models):
 
 
 def get_muse_models(user_id):
-    return get_muse_models_cache(user_id) or list(MUSE_FALLBACK_MODELS)
+    cached = get_muse_models_cache(user_id)
+    # Keep text generation available for accounts whose cache was populated
+    # before Muse Wonder became the default model.
+    return list(dict.fromkeys((cached or []) + MUSE_FALLBACK_MODELS))
 
 
 def refresh_muse_models(user_id):
@@ -5603,6 +6103,117 @@ def refresh_muse_models(user_id):
 
 def muse_model_supports_images(model):
     return "image" in (model or "").lower()
+
+
+BUFFER_API_URL = "https://api.buffer.com"
+
+
+def get_user_buffer_api_key(user_id):
+    try:
+        row = query_db(
+            "SELECT buffer_api_key AS api_key FROM users WHERE id = ?",
+            (user_id,),
+            one=True,
+        )
+    except sqlite3.OperationalError:
+        return ""
+    return (row["api_key"] or "").strip() if row else ""
+
+
+def buffer_graphql(api_key, query):
+    payload = perform_json_request(
+        BUFFER_API_URL,
+        {"query": query},
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=30,
+    )
+    if isinstance(payload, dict) and payload.get("errors"):
+        first_error = (payload["errors"] or [{}])[0] or {}
+        message = first_error.get("message") if isinstance(first_error, dict) else ""
+        raise ValueError(message or "Buffer API request failed.")
+    return (payload or {}).get("data") or {}
+
+
+def list_buffer_organizations(api_key):
+    data = buffer_graphql(api_key, "query GetOrganizations { account { organizations { id name } } }")
+    organizations = ((data.get("account") or {}).get("organizations")) or []
+    return [org for org in organizations if isinstance(org, dict) and org.get("id")]
+
+
+def validate_buffer_api_key(api_key):
+    try:
+        organizations = list_buffer_organizations(api_key)
+    except ValueError as error:
+        raise ValueError(f"Buffer API key validation failed: {error}") from error
+    if not organizations:
+        raise ValueError("Buffer API key validation failed: no organizations were returned.")
+    return organizations
+
+
+def list_buffer_channels(api_key):
+    channels = []
+    for organization in list_buffer_organizations(api_key):
+        data = buffer_graphql(
+            api_key,
+            "query GetChannels { channels(input: { organizationId: %s }) { id name service } }"
+            % json.dumps(organization["id"]),
+        )
+        for channel in data.get("channels") or []:
+            if not isinstance(channel, dict) or not channel.get("id"):
+                continue
+            channels.append(
+                {
+                    "id": channel["id"],
+                    "name": channel.get("name") or channel["id"],
+                    "service": channel.get("service") or "",
+                    "organization_id": organization["id"],
+                    "organization_name": organization.get("name") or "",
+                }
+            )
+    return channels
+
+
+def create_buffer_post(api_key, channel_id, text, draft=False, image_url=None):
+    draft_flag = ", saveToDraft: true" if draft else ""
+    assets_block = ""
+    if image_url:
+        assets_block = ", assets: [{ image: { url: %s } }]" % json.dumps(image_url)
+    query = (
+        "mutation CreateBufferPost { createPost(input: { text: %s, channelId: %s, "
+        "schedulingType: automatic, mode: addToQueue%s%s }) { "
+        "... on PostActionSuccess { post { id text dueAt } } "
+        "... on MutationError { message } } }"
+        % (json.dumps(text), json.dumps(channel_id), draft_flag, assets_block)
+    )
+    data = buffer_graphql(api_key, query)
+    result = data.get("createPost") or {}
+    post = result.get("post")
+    if not isinstance(post, dict) or not post.get("id"):
+        raise ValueError(result.get("message") or "Buffer did not accept the post.")
+    return {"id": post["id"], "text": post.get("text") or "", "due_at": post.get("dueAt") or ""}
+
+
+def record_social_post(user_id, channel_id, channel_name, text, status, buffer_post_id=None, image_url=None):
+    execute_db(
+        """
+        INSERT INTO social_posts (user_id, channel_id, channel_name, text, status, buffer_post_id, image_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (user_id, channel_id, channel_name, text, status, buffer_post_id, image_url),
+    )
+
+
+def list_social_posts(user_id, limit=20):
+    return query_db(
+        """
+        SELECT id, channel_id, channel_name, text, status, buffer_post_id, image_url, created_at
+        FROM social_posts
+        WHERE user_id = ?
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (user_id, limit),
+    )
 
 
 def generated_image_directory():
@@ -5742,10 +6353,20 @@ def run_ai_provider_prompt(user_id, provider, model, prompt):
         raise ValueError(f"No API key configured for provider '{provider}'.")
 
     if provider == "muse":
+        # muse-image is for image generation and may return no text at all.
+        # Existing accounts can still have that old model saved as their default.
+        if model == MUSE_IMAGE_DEFAULT_MODEL:
+            model = MUSE_TEXT_DEFAULT_MODEL
         payload = {
             "model": model,
-            "input": prompt,
-            "store": False,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt},
+                    ],
+                },
+            ],
             "stream": False,
         }
         response = perform_json_request(
@@ -5799,7 +6420,8 @@ def run_ai_provider_prompt(user_id, provider, model, prompt):
         raise ValueError(f"Unsupported provider: {provider}")
 
     if not text:
-        raise ValueError("The AI provider returned an empty response.")
+        detail = describe_empty_provider_response(provider, response)
+        raise ValueError(f"The AI provider returned an empty response.{detail}")
     return text, usage, model
 
 

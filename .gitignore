@@ -1,4 +1,49 @@
+# --- Entorno y secretos (nunca subir) ---
 .env
+client_secret_*.json
+*_secret*.json
+*.csr
+*.pem
+*.key
+ssh-keys/
+demo_website/.oneboard/
+
+# --- Python ---
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
 .venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Bases de datos y datos locales ---
+*.db
+*.sqlite3
+*.sqlite3-journal
+uploads/
+
+# --- Compilados y binarios generados ---
+dist/
+build/
+.build/
+.swiftpm/
+*.dmg
+*.exe
+*.app
+
+# --- Respaldos y copias locales ---
+backups/
+remote-sites/
+.build-tools/
+myproject/env/
+
+# --- Sistema, editores y logs ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log

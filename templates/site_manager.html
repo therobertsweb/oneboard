@@ -49,11 +49,13 @@
           <input
             type="text"
             class="form-control"
+            id="sitePathInput"
             name="path"
             placeholder="{{ t('site.path_placeholder') }}"
             value="{{ manager.directory.path if manager.directory else '' }}"
             required
           >
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="browseDirectoryBtn" data-browse-url="{{ url_for('api_site_manager_browse_directory') }}">{{ t("site.browse") }}</button>
           <button type="submit" class="btn btn-primary btn-sm">{{ t("site.connect") }}</button>
         </form>
       </article>
@@ -75,6 +77,40 @@
         <p>{{ t("site.remote_note") }}</p>
         {% endif %}
       </article>
+    </section>
+
+    <section class="panel projects-panel" id="projectsPanel" data-connect-url="{{ url_for('api_site_manager_connect') }}" data-remove-url="{{ url_for('api_site_manager_remove_project') }}" data-confirm-remove="{{ t('site.confirm_remove_project') }}">
+      <div class="panel-heading">
+        <h2>{{ t("site.projects") }}</h2>
+        <button type="button" class="btn btn-primary btn-sm" id="newProjectBtn">{{ t("site.new_project") }}</button>
+      </div>
+      <p class="settings-note">{{ t("site.projects_note") }}</p>
+      {% if manager.projects %}
+      <div class="project-list">
+        {% for project in manager.projects %}
+        <article class="project-row {{ 'active' if project.is_current else '' }}">
+          <div class="project-info">
+            <strong>{{ project.name }}</strong>
+            <span class="project-path">{{ project.path }}</span>
+          </div>
+          <div class="project-badges">
+            {% if project.is_current %}
+            <span class="status-pill ok">{{ t("site.current_project") }}</span>
+            {% endif %}
+            {% if not project.exists %}
+            <span class="status-pill warn">{{ t("site.project_missing") }}</span>
+            {% endif %}
+          </div>
+          <div class="project-actions">
+            {% if not project.is_current %}
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-open-project="{{ project.path }}">{{ t("site.open_project") }}</button>
+            {% endif %}
+            <button type="button" class="btn btn-outline-danger btn-sm" data-remove-project="{{ project.id }}">{{ t("site.remove_project") }}</button>
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+      {% endif %}
     </section>
 
     <div class="site-panel-frame">
@@ -264,7 +300,7 @@
       <article class="panel codex-update-panel">
         <div class="codex-console-header">
           <div>
-            <span class="overview-label">AI Website Studio</span>
+            <span class="overview-label">{{ t("site.ai_studio") }}</span>
             <h2>{{ t("site.codex_update") }}</h2>
           </div>
           {% if manager.directory %}
@@ -555,6 +591,30 @@
   </main>
 </div>
 
+<div class="modal fade" id="directoryBrowserModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title">{{ t("site.browser_title") }}</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="browser-current" id="browserCurrentPath"></p>
+        <div class="browser-nav">
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="browserUpBtn">{{ t("site.browser_up") }}</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="browserHomeBtn">{{ t("site.browser_home") }}</button>
+        </div>
+        <div class="list-group browser-list" id="browserList"></div>
+        <p class="browser-note" id="browserNote" hidden>{{ t("site.browser_cannot_select") }}</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">{{ t("site.browser_cancel") }}</button>
+        <button type="button" class="btn btn-primary" id="browserUseBtn">{{ t("site.use_folder") }}</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 (() => {
   const siteTabs = document.querySelectorAll("[data-site-tab]");
@@ -754,6 +814,118 @@
       }
     });
   });
+
+  const browseBtn = document.getElementById("browseDirectoryBtn");
+  const browserModalEl = document.getElementById("directoryBrowserModal");
+  const browserList = document.getElementById("browserList");
+  const browserCurrentPath = document.getElementById("browserCurrentPath");
+  const browserUpBtn = document.getElementById("browserUpBtn");
+  const browserHomeBtn = document.getElementById("browserHomeBtn");
+  const browserUseBtn = document.getElementById("browserUseBtn");
+  const browserNote = document.getElementById("browserNote");
+  const sitePathInput = document.getElementById("sitePathInput");
+  let browserState = { current: "", parent: null, home: "", canSelect: false };
+  let browserAutoConnect = false;
+
+  async function loadBrowserPath(path) {
+    if (!browseBtn || !browserList) return;
+    browserList.innerHTML = "";
+    browserCurrentPath.textContent = path || "";
+    try {
+      const response = await fetch(`${browseBtn.dataset.browseUrl}?path=${encodeURIComponent(path || "")}`);
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Request failed.");
+      }
+      const listing = data.listing;
+      browserState = { current: listing.current, parent: listing.parent, home: listing.home, canSelect: listing.can_select };
+      browserCurrentPath.textContent = listing.current;
+      browserUpBtn.disabled = !listing.parent;
+      browserUseBtn.disabled = !listing.can_select;
+      browserNote.hidden = listing.can_select;
+      if (!listing.entries.length) {
+        browserList.innerHTML = `<p class="browser-empty">{{ t("site.browser_empty") }}</p>`;
+        return;
+      }
+      listing.entries.forEach((entry) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "list-group-item list-group-item-action browser-entry";
+        item.textContent = entry.name;
+        item.addEventListener("click", () => loadBrowserPath(entry.path));
+        browserList.appendChild(item);
+      });
+    } catch (error) {
+      browserList.innerHTML = `<p class="browser-empty">${escapeHtml(error.message)}</p>`;
+    }
+  }
+
+  if (browseBtn && browserModalEl && window.bootstrap) {
+    const browserModal = window.bootstrap.Modal.getOrCreateInstance(browserModalEl);
+    browseBtn.addEventListener("click", () => {
+      browserAutoConnect = false;
+      loadBrowserPath(sitePathInput ? sitePathInput.value.trim() : "");
+      browserModal.show();
+    });
+    browserUpBtn.addEventListener("click", () => {
+      if (browserState.parent) loadBrowserPath(browserState.parent);
+    });
+    browserHomeBtn.addEventListener("click", () => loadBrowserPath(browserState.home));
+    browserUseBtn.addEventListener("click", () => {
+      if (sitePathInput && browserState.current) {
+        sitePathInput.value = browserState.current;
+      }
+      browserModal.hide();
+      if (browserAutoConnect && sitePathInput) {
+        const connectForm = sitePathInput.closest("form");
+        if (connectForm && typeof connectForm.requestSubmit === "function") {
+          connectForm.requestSubmit();
+        }
+      }
+      browserAutoConnect = false;
+    });
+  }
+
+  const projectsPanel = document.getElementById("projectsPanel");
+  const newProjectBtn = document.getElementById("newProjectBtn");
+  if (newProjectBtn && browserModalEl && window.bootstrap) {
+    newProjectBtn.addEventListener("click", () => {
+      browserAutoConnect = true;
+      loadBrowserPath("");
+      window.bootstrap.Modal.getOrCreateInstance(browserModalEl).show();
+    });
+  }
+  if (projectsPanel) {
+    projectsPanel.addEventListener("click", async (event) => {
+      const openBtn = event.target.closest("[data-open-project]");
+      const removeBtn = event.target.closest("[data-remove-project]");
+      if (!openBtn && !removeBtn) return;
+      const formData = new FormData();
+      let url;
+      if (openBtn) {
+        url = projectsPanel.dataset.connectUrl;
+        formData.append("path", openBtn.dataset.openProject);
+      } else {
+        if (!window.confirm(projectsPanel.dataset.confirmRemove)) return;
+        url = projectsPanel.dataset.removeUrl;
+        formData.append("project_id", removeBtn.dataset.removeProject);
+      }
+      if (openBtn) openBtn.disabled = true;
+      if (removeBtn) removeBtn.disabled = true;
+      try {
+        const response = await fetch(url, { method: "POST", body: formData });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          throw new Error(data.error || "Request failed.");
+        }
+        window.location.reload();
+      } catch (error) {
+        alert(error.message);
+        if (openBtn) openBtn.disabled = false;
+        if (removeBtn) removeBtn.disabled = false;
+      }
+    });
+  }
 
   const terminal = document.querySelector(".interactive-terminal");
   if (!terminal || terminal.dataset.disabled === "true") return;

@@ -82,6 +82,35 @@ class MuseProviderTests(unittest.TestCase):
         self.assertEqual(text, "hello from muse")
         self.assertEqual(usage, {"total_tokens": 7})
 
+    def test_parse_muse_response_surfaces_error_envelopes(self):
+        with self.assertRaisesRegex(ValueError, "model not found"):
+            oneboard.parse_muse_response({"error": {"message": "model not found"}})
+        with self.assertRaisesRegex(ValueError, "bad key"):
+            oneboard.parse_muse_response({"error": "bad key"})
+
+    def test_parse_muse_response_accepts_choices_shape(self):
+        payload = {
+            "choices": [{"message": {"role": "assistant", "content": "choice text"}}],
+            "usage": {"total_tokens": 3},
+        }
+        text, usage = oneboard.parse_muse_response(payload)
+        self.assertEqual(text, "choice text")
+        self.assertEqual(usage, {"total_tokens": 3})
+
+    def test_empty_muse_response_error_includes_diagnostics(self):
+        with oneboard.app.app_context():
+            oneboard.execute_db(
+                "UPDATE users SET muse_api_key = ? WHERE id = ?",
+                ("test-muse-key", self.user_id),
+            )
+        with mock.patch.object(
+            oneboard, "perform_json_request", return_value={"status": "failed", "id": "resp_1"}
+        ):
+            with self.assertRaisesRegex(ValueError, "status 'failed'") as raised:
+                with oneboard.app.app_context():
+                    oneboard.run_ai_provider_prompt(self.user_id, "muse", None, "hi")
+        self.assertIn("fields:", str(raised.exception))
+
     def test_muse_image_generation_saves_png(self):
         api_response = {
             "id": "resp-123",

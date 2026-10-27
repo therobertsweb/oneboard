@@ -202,9 +202,7 @@ scripts/build-macos-native.sh
 
 ## Notas Windows
 
-- El sandbox `sandbox-exec` solo existe en macOS. En Windows, ONEBoard mantiene la restricción por allowlist de herramientas y validación de rutas dentro del workspace.
-- La terminal integrada permite solo el editor de plataforma. En Windows el editor de plataforma es `notepad`.
-- Las rutas absolutas como `C:\...`, `\\server\share` y referencias `..` se bloquean en comandos restringidos para evitar salidas del workspace.
+- La terminal integrada ejecuta comandos del shell del sistema con los permisos del usuario que ejecuta ONEBoard. Cada comando empieza en la carpeta del proyecto, pero puede acceder a otras rutas y recursos disponibles para esa cuenta.
 - La base de datos SQLite se crea automáticamente en `oneboard.db`.
 - Los backups se guardan en `backups\`.
 - Los uploads de usuario se guardan en `uploads\`.

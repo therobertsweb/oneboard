@@ -1,3 +1,4 @@
+import io
 import os
 import re
 import tempfile
@@ -161,6 +162,55 @@ class EmailVerificationTests(unittest.TestCase):
             self.assertNotIn(b"/reset-password/", response.data)
             message = server.send_message.call_args.args[0]
             self.assertIn("/reset-password/", message.get_content())
+
+    def test_api_settings_account_updates_profile_and_company(self):
+        self.register_verified_user("api-account@example.test")
+        login = self.client.post(
+            "/api/auth/login",
+            json={"email": "api-account@example.test", "password": "password123"},
+        )
+        self.assertEqual(login.status_code, 200)
+
+        update = self.client.post(
+            "/api/settings/account",
+            json={
+                "name": "New Name",
+                "company_name": "Acme",
+                "company_email": "hi@acme.test",
+                "buffer_api_key": "buffer-key-123",
+            },
+        )
+        self.assertEqual(update.status_code, 200, update.get_data(as_text=True))
+        account = update.get_json()["account"]
+        self.assertEqual(account["name"], "New Name")
+        self.assertEqual(account["company_name"], "Acme")
+        self.assertTrue(account["buffer_api_key_configured"])
+
+        email_without_password = self.client.post(
+            "/api/settings/account",
+            json={"email": "changed@example.test"},
+        )
+        self.assertEqual(email_without_password.status_code, 401)
+
+        email_change = self.client.post(
+            "/api/settings/account",
+            json={"email": "changed@example.test", "current_password": "password123"},
+        )
+        self.assertEqual(email_change.status_code, 200, email_change.get_data(as_text=True))
+        self.assertEqual(email_change.get_json()["account"]["email"], "changed@example.test")
+
+        avatar_png = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+            b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        upload = self.client.post(
+            "/api/settings/account",
+            data={"avatar": (io.BytesIO(avatar_png), "me.png")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(upload.status_code, 200, upload.get_data(as_text=True))
+        self.assertTrue(upload.get_json()["account"]["avatar_path"].endswith(".png"))
 
 
 if __name__ == "__main__":

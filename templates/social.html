@@ -1,0 +1,342 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t("social.title") }} | ONEBoard{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    {% include "partials/sidebar_brand.html" %}
+    {% set active_page = "social" %}
+    {% include "partials/sidebar_nav.html" %}
+  </aside>
+
+  <main class="dashboard-main">
+    <header class="topbar">
+      <div>
+        <p class="page-kicker">{{ t("social.kicker") }}</p>
+        <h1>{{ t("social.title") }}</h1>
+      </div>
+      <div class="topbar-actions">
+        {% include "partials/user_chip.html" %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("nav.logout") }}</button>
+        </form>
+      </div>
+    </header>
+
+    {% include "partials/alerts.html" %}
+
+    {% if not buffer_configured %}
+    <div class="alert alert-warning app-alert" role="alert">
+      <span class="app-alert-icon" aria-hidden="true"></span>
+      <div class="app-alert-copy">
+        {{ t("social.key_missing") }}
+        <a href="{{ url_for('settings') }}">{{ t("social.key_missing_link") }}</a>
+      </div>
+    </div>
+    {% endif %}
+
+    <div id="socialApp"
+      data-channels-url="{{ url_for('api_social_buffer_channels') }}"
+      data-generate-url="{{ url_for('api_social_generate') }}"
+      data-images-url="{{ url_for('api_ai_images_generate') }}"
+      data-posts-url="{{ url_for('api_social_buffer_create_post') }}"
+      data-history-url="{{ url_for('api_social_buffer_history') }}"
+      data-working="{{ t('social.working') }}"
+      data-published="{{ t('social.published_ok') }}"
+      data-draft-saved="{{ t('social.draft_ok') }}"
+      data-empty-preview="{{ t('social.preview_empty') }}"
+      data-no-posts="{{ t('social.no_posts') }}">
+
+      <section class="social-grid">
+        <article class="panel">
+          <div class="panel-heading">
+            <h2>{{ t("social.composer") }}</h2>
+          </div>
+          <div class="mb-3">
+            <label for="socialChannel" class="form-label">{{ t("social.channel") }}</label>
+            <select class="form-select" id="socialChannel">
+              <option value="">{{ t("social.loading_channels") }}</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label for="socialText" class="form-label">{{ t("social.post_text") }}</label>
+            <textarea class="form-control social-textarea" id="socialText" rows="5" placeholder="{{ t('social.text_placeholder') }}"></textarea>
+          </div>
+          <div class="social-assist">
+            <label for="socialAssistPrompt" class="form-label">{{ t("social.assist_label") }}</label>
+            <div class="social-inline-row">
+              <input type="text" class="form-control" id="socialAssistPrompt" placeholder="{{ t('social.assist_placeholder') }}">
+              <button type="button" class="btn btn-outline-secondary" id="socialAssistBtn">{{ t("social.assist_button") }}</button>
+            </div>
+          </div>
+          <div class="social-assist">
+            <label for="socialImagePrompt" class="form-label">{{ t("social.image_label") }}</label>
+            <div class="social-inline-row">
+              <input type="text" class="form-control" id="socialImagePrompt" placeholder="{{ t('social.image_placeholder') }}">
+              <button type="button" class="btn btn-outline-secondary" id="socialImageBtn">{{ t("social.image_button") }}</button>
+            </div>
+            <p class="social-hint" id="socialImageState" hidden>{{ t("social.image_attached") }}</p>
+            <p class="social-hint warn" id="socialLocalhostNote" hidden>{{ t("social.localhost_warning") }}</p>
+            <button type="button" class="btn btn-outline-danger btn-sm" id="socialImageRemove" hidden>{{ t("social.remove_image") }}</button>
+          </div>
+          <p class="social-status" id="socialStatus" role="status"></p>
+          <div class="social-actions">
+            <button type="button" class="btn btn-outline-secondary" id="socialDraftBtn">{{ t("social.save_draft") }}</button>
+            <button type="button" class="btn btn-primary" id="socialQueueBtn">{{ t("social.add_queue") }}</button>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading">
+            <h2>{{ t("social.preview") }}</h2>
+          </div>
+          <div class="social-preview-card">
+            <div class="social-preview-header">
+              <span class="user-avatar fallback" id="socialPreviewAvatar">O</span>
+              <div>
+                <strong id="socialPreviewChannel">{{ t("social.select_channel") }}</strong>
+                <span class="social-preview-service" id="socialPreviewService"></span>
+              </div>
+            </div>
+            <p class="social-preview-text" id="socialPreviewText"></p>
+            <img class="social-preview-image" id="socialPreviewImage" alt="" hidden>
+          </div>
+          <p class="social-hint">{{ t("social.preview_note") }}</p>
+        </article>
+      </section>
+
+      <section class="panel social-history-panel">
+        <div class="panel-heading">
+          <h2>{{ t("social.history") }}</h2>
+        </div>
+        <div class="social-history-list" id="socialHistory"></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const app = document.getElementById("socialApp");
+  if (!app) return;
+
+  const channelSelect = document.getElementById("socialChannel");
+  const postText = document.getElementById("socialText");
+  const assistPrompt = document.getElementById("socialAssistPrompt");
+  const assistBtn = document.getElementById("socialAssistBtn");
+  const imagePrompt = document.getElementById("socialImagePrompt");
+  const imageBtn = document.getElementById("socialImageBtn");
+  const imageRemove = document.getElementById("socialImageRemove");
+  const imageState = document.getElementById("socialImageState");
+  const localhostNote = document.getElementById("socialLocalhostNote");
+  const statusLine = document.getElementById("socialStatus");
+  const draftBtn = document.getElementById("socialDraftBtn");
+  const queueBtn = document.getElementById("socialQueueBtn");
+  const previewChannel = document.getElementById("socialPreviewChannel");
+  const previewService = document.getElementById("socialPreviewService");
+  const previewText = document.getElementById("socialPreviewText");
+  const previewImage = document.getElementById("socialPreviewImage");
+  const historyList = document.getElementById("socialHistory");
+
+  let attachedImageUrl = "";
+  const defaultChannelLabel = previewChannel.textContent;
+
+  function escapeHtml(value) {
+    return String(value || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function setBusy(button, busy) {
+    if (!button) return;
+    if (busy) {
+      button.dataset.label = button.textContent;
+      button.disabled = true;
+      button.textContent = app.dataset.working;
+    } else {
+      button.disabled = false;
+      if (button.dataset.label) button.textContent = button.dataset.label;
+    }
+  }
+
+  function updatePreview() {
+    const option = channelSelect.options[channelSelect.selectedIndex];
+    const name = option && option.value ? option.textContent.split(" · ")[0] : "";
+    previewChannel.textContent = name || defaultChannelLabel;
+    previewService.textContent = option && option.dataset.service ? option.dataset.service : "";
+    const text = postText.value.trim();
+    previewText.textContent = text || app.dataset.emptyPreview;
+    previewText.classList.toggle("empty", !text);
+    if (attachedImageUrl) {
+      previewImage.src = attachedImageUrl;
+      previewImage.hidden = false;
+    } else {
+      previewImage.removeAttribute("src");
+      previewImage.hidden = true;
+    }
+  }
+
+  async function postJson(url, payload) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || "Request failed.");
+    }
+    return data;
+  }
+
+  async function loadChannels() {
+    try {
+      const response = await fetch(app.dataset.channelsUrl);
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Request failed.");
+      }
+      channelSelect.innerHTML = "";
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = previewChannel.textContent;
+      channelSelect.appendChild(placeholder);
+      data.channels.forEach((channel) => {
+        const option = document.createElement("option");
+        option.value = channel.id;
+        option.dataset.service = channel.service || "";
+        option.textContent = `${channel.name} · ${channel.service || ""}`.trim();
+        channelSelect.appendChild(option);
+      });
+    } catch (error) {
+      channelSelect.innerHTML = "";
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = error.message;
+      channelSelect.appendChild(option);
+    }
+    updatePreview();
+  }
+
+  async function loadHistory() {
+    try {
+      const response = await fetch(app.dataset.historyUrl);
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Request failed.");
+      }
+      if (!data.posts.length) {
+        historyList.innerHTML = `<p class="browser-empty">${escapeHtml(app.dataset.noPosts)}</p>`;
+        return;
+      }
+      historyList.innerHTML = "";
+      data.posts.forEach((post) => {
+        const row = document.createElement("article");
+        row.className = "social-history-row";
+        const pill = post.status === "draft" ? "warn" : "ok";
+        row.innerHTML =
+          `<div class="project-info"><strong>${escapeHtml(post.channel_name || "")}</strong>` +
+          `<span class="project-path">${escapeHtml(post.text || "")}</span></div>` +
+          `<span class="status-pill ${pill}">${escapeHtml(post.status || "")}</span>`;
+        historyList.appendChild(row);
+      });
+    } catch (error) {
+      historyList.innerHTML = `<p class="browser-empty">${escapeHtml(error.message)}</p>`;
+    }
+  }
+
+  postText.addEventListener("input", updatePreview);
+  channelSelect.addEventListener("change", updatePreview);
+
+  assistBtn.addEventListener("click", async () => {
+    const prompt = assistPrompt.value.trim();
+    if (!prompt) {
+      assistPrompt.focus();
+      return;
+    }
+    setBusy(assistBtn, true);
+    statusLine.textContent = "";
+    try {
+      const data = await postJson(app.dataset.generateUrl, { prompt });
+      postText.value = data.text || "";
+      updatePreview();
+    } catch (error) {
+      statusLine.textContent = error.message;
+    } finally {
+      setBusy(assistBtn, false);
+    }
+  });
+
+  imageBtn.addEventListener("click", async () => {
+    const prompt = imagePrompt.value.trim();
+    if (!prompt) {
+      imagePrompt.focus();
+      return;
+    }
+    setBusy(imageBtn, true);
+    statusLine.textContent = "";
+    try {
+      const data = await postJson(app.dataset.imagesUrl, { prompt });
+      const relative = (data.image && data.image.url) || "";
+      attachedImageUrl = relative ? new URL(relative, window.location.origin).href : "";
+      const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/.test(window.location.hostname);
+      imageState.hidden = !attachedImageUrl;
+      imageRemove.hidden = !attachedImageUrl;
+      localhostNote.hidden = !(attachedImageUrl && isLocal);
+      updatePreview();
+    } catch (error) {
+      statusLine.textContent = error.message;
+    } finally {
+      setBusy(imageBtn, false);
+    }
+  });
+
+  imageRemove.addEventListener("click", () => {
+    attachedImageUrl = "";
+    imageState.hidden = true;
+    imageRemove.hidden = true;
+    localhostNote.hidden = true;
+    updatePreview();
+  });
+
+  async function publish(draft) {
+    const channelId = channelSelect.value;
+    const text = postText.value.trim();
+    if (!channelId || !text) {
+      statusLine.textContent = "";
+      if (!channelId) channelSelect.focus();
+      else postText.focus();
+      return;
+    }
+    const button = draft ? draftBtn : queueBtn;
+    setBusy(button, true);
+    statusLine.textContent = "";
+    try {
+      await postJson(app.dataset.postsUrl, {
+        channel_id: channelId,
+        text,
+        draft,
+        image_url: attachedImageUrl || undefined,
+      });
+      statusLine.textContent = draft ? app.dataset.draftSaved : app.dataset.published;
+      await loadHistory();
+    } catch (error) {
+      statusLine.textContent = error.message;
+    } finally {
+      setBusy(button, false);
+    }
+  }
+
+  draftBtn.addEventListener("click", () => publish(true));
+  queueBtn.addEventListener("click", () => publish(false));
+
+  loadChannels();
+  loadHistory();
+  updatePreview();
+})();
+</script>
+{% endblock %}

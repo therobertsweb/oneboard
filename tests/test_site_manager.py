@@ -90,6 +90,237 @@ class SiteManagerTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
 
+    def test_connect_creates_a_missing_nested_directory(self):
+        target = self.workspace_path / "brand" / "new-site"
+        manager = self.connect(target)
+
+        self.assertTrue(target.is_dir())
+        self.assertEqual(manager["directory"]["path"], str(target.resolve()))
+
+    def test_connect_accepts_quoted_and_escaped_paths(self):
+        quoted = self.client.post(
+            "/api/site-manager/connect",
+            json={"path": f'  "{self.site}"  '},
+        )
+        self.assertEqual(quoted.status_code, 200, quoted.get_data(as_text=True))
+
+        spaced = self.workspace_path / "my site"
+        spaced.mkdir()
+        escaped = self.client.post(
+            "/api/site-manager/connect",
+            json={"path": str(spaced).replace(" ", "\\ ")},
+        )
+        self.assertEqual(escaped.status_code, 200, escaped.get_data(as_text=True))
+        self.assertEqual(
+            escaped.get_json()["manager"]["directory"]["path"], str(spaced.resolve())
+        )
+
+    def test_connect_still_rejects_home_files_and_filesystem_root(self):
+        for bad_path in (
+            os.path.expanduser("~"),
+            os.path.abspath(os.sep),
+            str(self.site / "index.html"),
+        ):
+            response = self.client.post("/api/site-manager/connect", json={"path": bad_path})
+            self.assertEqual(response.status_code, 400, bad_path)
+
+    def test_projects_are_listed_and_switchable(self):
+        site_b = self.workspace_path / "site-b"
+        site_b.mkdir()
+        (site_b / "index.html").write_text("b-original", encoding="utf-8")
+
+        self.connect()
+        manager = self.connect(site_b)
+        projects = manager["projects"]
+        self.assertEqual({item["name"] for item in projects}, {"site-a", "site-b"})
+        current = next(item for item in projects if item["is_current"])
+        self.assertEqual(current["name"], "site-b")
+        self.assertTrue(all(item["exists"] for item in projects))
+
+        manager = self.connect()
+        projects = manager["projects"]
+        current = next(item for item in projects if item["is_current"])
+        self.assertEqual(current["name"], "site-a")
+
+        with oneboard.app.app_context():
+            oneboard.execute_db(
+                "UPDATE website_workspaces SET last_opened_at = ? WHERE user_id = ? AND path = ?",
+                ("2020-01-01 00:00:00", self.user_id, str(self.site.resolve())),
+            )
+            oneboard.execute_db(
+                "UPDATE website_workspaces SET last_opened_at = ? WHERE user_id = ? AND path = ?",
+                ("2021-01-01 00:00:00", self.user_id, str(site_b.resolve())),
+            )
+        ordered = self.client.get("/api/site-manager").get_json()["manager"]["projects"]
+        self.assertEqual([item["name"] for item in ordered], ["site-b", "site-a"])
+
+    def test_chat_messages_are_scoped_per_project(self):
+        site_b = self.workspace_path / "site-b"
+        site_b.mkdir()
+        (site_b / "index.html").write_text("b-original", encoding="utf-8")
+        self.connect()
+        with oneboard.app.app_context():
+            oneboard.execute_db(
+                "UPDATE users SET muse_api_key = ? WHERE id = ?",
+                ("test-muse-key", self.user_id),
+            )
+        ai_response = {
+            "summary": "Touched site A.",
+            "files": [{"path": "index.html", "content": "<html><body>A</body></html>"}],
+        }
+        with mock.patch.object(
+            oneboard,
+            "run_ai_provider_prompt",
+            return_value=(oneboard.json.dumps(ai_response), {"total_tokens": 5}, "muse-text-1.0"),
+        ), mock.patch.object(
+            oneboard,
+            "get_muse_models",
+            return_value=["muse-text-1.0", "muse-image-1.0"],
+        ):
+            update = self.client.post(
+                "/api/site-manager/codex-update",
+                json={"prompt": "Touch site A"},
+            )
+        self.assertEqual(update.status_code, 200, update.get_data(as_text=True))
+        self.assertEqual(len(update.get_json()["manager"]["codex_messages"]), 2)
+
+        switched = self.connect(site_b)
+        self.assertEqual(switched["codex_messages"], [])
+
+        back = self.connect()
+        self.assertEqual(len(back["codex_messages"]), 2)
+
+    def test_legacy_chat_messages_attach_to_current_project(self):
+        site_b = self.workspace_path / "site-b"
+        site_b.mkdir()
+        (site_b / "index.html").write_text("b-original", encoding="utf-8")
+        self.connect()
+        with oneboard.app.app_context():
+            oneboard.execute_db(
+                "INSERT INTO website_codex_messages (user_id, role, content) VALUES (?, ?, ?)",
+                (self.user_id, "user", "legacy hello"),
+            )
+        manager = self.client.get("/api/site-manager").get_json()["manager"]
+        self.assertEqual(len(manager["codex_messages"]), 1)
+
+        switched = self.connect(site_b)
+        self.assertEqual(switched["codex_messages"], [])
+
+    def test_remove_project_disconnects_current(self):
+        site_b = self.workspace_path / "site-b"
+        site_b.mkdir()
+        (site_b / "index.html").write_text("b-original", encoding="utf-8")
+        self.connect()
+        manager = self.connect(site_b)
+        current_id = next(item["id"] for item in manager["projects"] if item["is_current"])
+
+        removed = self.client.post(
+            "/api/site-manager/projects/remove",
+            json={"project_id": current_id},
+        )
+        self.assertEqual(removed.status_code, 200, removed.get_data(as_text=True))
+        body = removed.get_json()["manager"]
+        self.assertIsNone(body["directory"])
+        self.assertEqual([item["name"] for item in body["projects"]], ["site-a"])
+
+        bogus = self.client.post(
+            "/api/site-manager/projects/remove",
+            json={"project_id": 999999},
+        )
+        self.assertEqual(bogus.status_code, 400)
+
+    def test_browse_directory_lists_subfolders_and_selection_rules(self):
+        root = self.workspace_path / "browse-root"
+        (root / "alpha").mkdir(parents=True)
+        (root / "beta").mkdir(parents=True)
+        (root / ".hidden").mkdir(parents=True)
+        (root / "file.txt").write_text("not a dir", encoding="utf-8")
+
+        response = self.client.get(
+            "/api/site-manager/browse-directory",
+            query_string={"path": str(root)},
+        )
+
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        listing = response.get_json()["listing"]
+        self.assertEqual(listing["current"], os.path.realpath(root))
+        self.assertEqual(
+            [entry["name"] for entry in listing["entries"]],
+            ["alpha", "beta"],
+        )
+        self.assertTrue(listing["can_select"])
+        self.assertEqual(listing["parent"], os.path.realpath(self.workspace_path))
+
+    def test_browse_directory_blocks_app_data_files_and_home_selection(self):
+        blocked = self.client.get(
+            "/api/site-manager/browse-directory",
+            query_string={"path": TEST_DATA.name},
+        )
+        self.assertEqual(blocked.status_code, 400)
+
+        not_a_dir = self.client.get(
+            "/api/site-manager/browse-directory",
+            query_string={"path": str(self.site / "index.html")},
+        )
+        self.assertEqual(not_a_dir.status_code, 400)
+
+        home = self.client.get(
+            "/api/site-manager/browse-directory",
+            query_string={"path": os.path.expanduser("~")},
+        )
+        self.assertEqual(home.status_code, 200, home.get_data(as_text=True))
+        self.assertFalse(home.get_json()["listing"]["can_select"])
+
+    def test_api_file_raw_serves_workspace_files(self):
+        self.connect()
+
+        response = self.client.get(
+            "/api/site-manager/files/raw",
+            query_string={"path": "index.html"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_data(as_text=True), "original")
+
+        missing = self.client.get(
+            "/api/site-manager/files/raw",
+            query_string={"path": "nope.html"},
+        )
+        self.assertEqual(missing.status_code, 404)
+
+        escape = self.client.get(
+            "/api/site-manager/files/raw",
+            query_string={"path": "../outside.txt"},
+        )
+        self.assertEqual(escape.status_code, 404)
+
+    def test_api_asset_raw_serves_uploaded_assets(self):
+        self.connect()
+        png = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+            b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        upload = self.client.post(
+            "/api/site-manager/assets/upload",
+            data={"asset": (io.BytesIO(png), "pic.png")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(upload.status_code, 200, upload.get_data(as_text=True))
+        asset_path = upload.get_json()["asset_path"]
+
+        response = self.client.get(
+            "/api/site-manager/assets/raw",
+            query_string={"path": asset_path},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_data(), png)
+
+        bogus = self.client.get(
+            "/api/site-manager/assets/raw",
+            query_string={"path": ".oneboard/user-assets/nope.png"},
+        )
+        self.assertEqual(bogus.status_code, 404)
+
     def test_backup_restore_preserves_internal_state_and_excludes_symlinks(self):
         git_dir = self.site / ".git"
         oneboard_dir = self.site / ".oneboard" / "home"
@@ -242,6 +473,109 @@ class SiteManagerTests(unittest.TestCase):
         update = response.get_json()["manager"]["updates"][0]
         self.assertEqual(update["source"], "ai-direct:muse")
         self.assertEqual(update["status"], "pending")
+
+    def test_codex_update_creates_arbitrary_non_html_files(self):
+        self.connect()
+        with oneboard.app.app_context():
+            oneboard.execute_db(
+                "UPDATE users SET muse_api_key = ? WHERE id = ?",
+                ("test-muse-key", self.user_id),
+            )
+
+        ai_response = {
+            "summary": "Created project notes, config, and container file.",
+            "files": [
+                {"path": "notes/tareas.md", "content": "# Tareas\n\n- Una\n"},
+                {"path": "data/config.json", "content": '{"retries": 3}'},
+                {"path": "Dockerfile", "content": "FROM python:3.12\n"},
+                {"path": "index.html", "content": "<html><body>same</body></html>"},
+            ],
+        }
+
+        with mock.patch.object(
+            oneboard,
+            "run_ai_provider_prompt",
+            return_value=(oneboard.json.dumps(ai_response), {"total_tokens": 42}, "muse-text-1.0"),
+        ), mock.patch.object(
+            oneboard,
+            "get_muse_models",
+            return_value=["muse-text-1.0", "muse-image-1.0"],
+        ):
+            response = self.client.post(
+                "/api/site-manager/codex-update",
+                json={"prompt": "Create project notes and config files"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertIn("Tareas", (self.site / "notes" / "tareas.md").read_text(encoding="utf-8"))
+        self.assertEqual(
+            oneboard.json.loads((self.site / "data" / "config.json").read_text(encoding="utf-8")),
+            {"retries": 3},
+        )
+        self.assertIn("FROM python", (self.site / "Dockerfile").read_text(encoding="utf-8"))
+
+    def test_codex_update_works_in_an_empty_workspace(self):
+        empty_site = self.workspace_path / "empty-site"
+        empty_site.mkdir()
+        self.connect(empty_site)
+        with oneboard.app.app_context():
+            oneboard.execute_db(
+                "UPDATE users SET muse_api_key = ? WHERE id = ?",
+                ("test-muse-key", self.user_id),
+            )
+
+        ai_response = {
+            "summary": "Created the first note.",
+            "files": [{"path": "notes.txt", "content": "hello workspace"}],
+        }
+
+        with mock.patch.object(
+            oneboard,
+            "run_ai_provider_prompt",
+            return_value=(oneboard.json.dumps(ai_response), {"total_tokens": 7}, "muse-text-1.0"),
+        ), mock.patch.object(
+            oneboard,
+            "get_muse_models",
+            return_value=["muse-text-1.0", "muse-image-1.0"],
+        ):
+            response = self.client.post(
+                "/api/site-manager/codex-update",
+                json={"prompt": "Create a notes file"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual((empty_site / "notes.txt").read_text(encoding="utf-8"), "hello workspace")
+
+    def test_codex_update_still_rejects_unsafe_file_paths(self):
+        self.connect()
+        with oneboard.app.app_context():
+            oneboard.execute_db(
+                "UPDATE users SET muse_api_key = ? WHERE id = ?",
+                ("test-muse-key", self.user_id),
+            )
+
+        for unsafe_path in ("../escape.txt", "photo.png", ".git/hooks/x"):
+            ai_response = {
+                "summary": "Trying something unsafe.",
+                "files": [{"path": unsafe_path, "content": "nope"}],
+            }
+            with mock.patch.object(
+                oneboard,
+                "run_ai_provider_prompt",
+                return_value=(oneboard.json.dumps(ai_response), {"total_tokens": 7}, "muse-text-1.0"),
+            ), mock.patch.object(
+                oneboard,
+                "get_muse_models",
+                return_value=["muse-text-1.0", "muse-image-1.0"],
+            ):
+                response = self.client.post(
+                    "/api/site-manager/codex-update",
+                    json={"prompt": "Do the unsafe thing"},
+                )
+
+            self.assertEqual(response.status_code, 400, unsafe_path)
+        self.assertFalse((self.workspace_path / "escape.txt").exists())
+        self.assertFalse((self.site / "photo.png").exists())
 
     def test_seo_page_creation_returns_a_specific_notification(self):
         self.connect()

@@ -158,6 +158,29 @@
 
       <section class="panel settings-form-panel">
         <div class="panel-heading">
+          <h2>{{ t("settings.buffer") }}</h2>
+        </div>
+        <p class="settings-note">
+          {{ t("settings.buffer_note") }}
+          {% if account.buffer_api_key %}{{ t("settings.buffer_configured") }}.{% endif %}
+        </p>
+        <div class="settings-form-grid">
+          <div>
+            <label for="buffer_api_key" class="form-label">{{ t("settings.buffer_api_key") }}</label>
+            <input
+              type="password"
+              class="form-control"
+              id="buffer_api_key"
+              name="buffer_api_key"
+              placeholder="{{ t('settings.buffer_api_key_placeholder') }}"
+              autocomplete="off"
+            >
+          </div>
+        </div>
+      </section>
+
+      <section class="panel settings-form-panel">
+        <div class="panel-heading">
           <h2>Google Search Console</h2>
         </div>
         <p class="settings-note">{{ t("settings.google_note") }}</p>
