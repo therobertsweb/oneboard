@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}{{ report.site_name }} — {{ report.period }} | ONEBoard{% endblock %}
+
+{% block body %}
+<main class="dashboard-main" style="margin: 0 auto; max-width: 900px; padding: 24px;">
+  <header class="topbar">
+    <div>
+      {% if report.logo_url %}<img src="{{ report.logo_url }}" alt="" style="max-height: 48px;">{% endif %}
+      <p class="page-kicker">{{ report.company_name or "ONEBoard" }}</p>
+      <h1>{{ report.site_name }} — {{ t("rep.summary_for") }} {{ report.period }}</h1>
+      {% if report.client_name %}<p class="settings-note">{{ report.client_name }}</p>{% endif %}
+      {% if report.title %}<p class="settings-note">{{ report.title }}</p>{% endif %}
+    </div>
+    <div class="topbar-actions">
+      <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">{{ t("rep.download") }}</button>
+    </div>
+  </header>
+
+  <section class="panel">
+    <div class="row g-2">
+      <div class="col-md-3">
+        <p class="settings-note">{{ t("rep.changes") }}</p>
+        <p><strong>{{ report.changes_count }}</strong></p>
+      </div>
+      <div class="col-md-3">
+        <p class="settings-note">{{ t("rep.inquiries") }}</p>
+        <p><strong>{{ report.inquiries_count }}</strong></p>
+      </div>
+      <div class="col-md-3">
+        <p class="settings-note">{{ t("rep.issues") }}</p>
+        <p><strong>{{ report.issues_resolved }}</strong></p>
+      </div>
+      <div class="col-md-3">
+        <p class="settings-note">{{ t("rep.requests_done") }}</p>
+        <p><strong>{{ report.requests_done }}</strong></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-heading">
+      <h2>{{ t("rep.changes") }}</h2>
+    </div>
+    {% if not report.changes %}
+    <p class="settings-note">—</p>
+    {% endif %}
+    {% for change in report.changes %}
+    <p class="mb-1">• {{ change.summary }} <span class="settings-note">({{ change.created_at }})</span></p>
+    {% endfor %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-heading">
+      <h2>{{ t("rep.inquiries") }}</h2>
+    </div>
+    {% if not report.inquiries %}
+    <p class="settings-note">—</p>
+    {% endif %}
+    {% for inquiry in report.inquiries %}
+    <div class="mb-2 pb-2 border-bottom">
+      <p><strong>{{ inquiry.name or "—" }}</strong> <span class="settings-note">{{ inquiry.page or "" }} · {{ inquiry.created_at }}</span></p>
+      <p>{{ inquiry.message }}</p>
+    </div>
+    {% endfor %}
+  </section>
+</main>
+{% endblock %}

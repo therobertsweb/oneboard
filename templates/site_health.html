@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t("site.health") }} | ONEBoard{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    {% include "partials/sidebar_brand.html" %}
+    {% set active_page = "site_health" %}
+    {% include "partials/sidebar_nav.html" %}
+  </aside>
+
+  <main class="dashboard-main">
+    <header class="topbar">
+      <div>
+        <p class="page-kicker"><a href="{{ url_for('site_manager') }}">{{ t("site.back_to_studio") }}</a></p>
+        <h1>{{ t("site.health") }}</h1>
+        <p class="settings-note">{{ t("site.health_note") }}</p>
+      </div>
+      <div class="topbar-actions">
+        {% include "partials/user_chip.html" %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("nav.logout") }}</button>
+        </form>
+      </div>
+    </header>
+
+    {% include "partials/alerts.html" %}
+    {% if not health.can_edit %}
+    <div class="alert alert-info">{{ t("teams.read_only") }}</div>
+    {% endif %}
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("site.last_scan") }}</h2>
+      </div>
+      <p class="settings-note">
+        {% if health.last_scan and health.last_scan.finished_at %}
+        {{ health.last_scan.finished_at }}
+        {% else %}
+        {{ t("site.never_scanned") }}
+        {% endif %}
+      </p>
+      <form method="post" action="{{ url_for('site_health') }}" class="d-flex gap-3 align-items-center flex-wrap">
+        <label class="form-check">
+          <input class="form-check-input" type="checkbox" name="skip_external" value="1">
+          <span class="form-check-label">{{ t("site.skip_external") }}</span>
+        </label>
+        <button type="submit" class="btn btn-primary btn-sm">{{ t("site.scan_now") }}</button>
+      </form>
+    </section>
+
+    {% if health.findings and health.can_edit %}
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("site.fix_all") }}</h2>
+      </div>
+      <p class="settings-note">{{ t("site.fix_all_note") }}</p>
+      <div class="d-flex gap-2 flex-wrap align-items-center">
+        <form method="post" action="{{ url_for('site_health_fix_all') }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("site.fix_all") }} ({{ health.findings | length }})</button>
+        </form>
+        <form method="post" action="{{ url_for('site_health_ai_fix') }}">
+          <button type="submit" class="btn btn-primary btn-sm">{{ t("site.fix_all_ai") }}</button>
+        </form>
+      </div>
+      <p class="settings-note mt-2">{{ t("site.fix_all_ai_note") }}</p>
+      <div id="aiSummaryWrap" class="mt-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="aiSummaryBtn">{{ t("site.explain_ai") }}</button>
+        <p class="settings-note mt-2" id="aiSummaryText" role="status"></p>
+      </div>
+    </section>
+    <script>
+    (() => {
+      const btn = document.getElementById("aiSummaryBtn");
+      const out = document.getElementById("aiSummaryText");
+      if (!btn || !out) return;
+      btn.addEventListener("click", async () => {
+        const label = btn.textContent;
+        btn.disabled = true;
+        out.textContent = "";
+        try {
+          const response = await fetch("{{ url_for('api_site_health_summary') }}", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          const data = await response.json();
+          if (!response.ok || !data.ok) throw new Error(data.error || "Request failed.");
+          out.textContent = data.summary || "";
+        } catch (error) {
+          out.textContent = error.message;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
+      });
+    })();
+    </script>
+    {% endif %}
+
+    {% if not health.findings %}
+    <div class="empty-state">{{ t("site.no_findings") }}</div>
+    {% endif %}
+
+    {% for finding in health.findings %}
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("site.check_" + finding.check) }}</h2>
+        <span class="status-pill {{ 'warn' if finding.severity == 'error' else 'info' }}">{{ t("site.severity_" + finding.severity) }}</span>
+      </div>
+      <p class="settings-note"><strong>{{ t("site.where") }}:</strong> {{ finding.page }}{% if finding.detail and finding.detail != finding.page %} — {{ finding.detail }}{% endif %}</p>
+      {% if finding.check in ("missing_title", "missing_alt", "form_input_name") %}
+      <form method="post" action="{{ url_for('site_finding_apply', finding_id=finding.id) }}" class="d-flex gap-2 flex-wrap align-items-end">
+        <div class="flex-grow-1" style="min-width: 240px;">
+          <label class="form-label">{{ t("site.proposal") }}</label>
+          {% if finding.check == "missing_title" %}
+          <input class="form-control form-control-sm" type="text" name="title" value="{{ finding.proposal.title or '' }}" maxlength="160" {% if not health.can_edit %}disabled{% endif %}>
+          {% elif finding.check == "missing_alt" %}
+          <input class="form-control form-control-sm" type="text" name="alt" value="{{ finding.proposal.alt or '' }}" maxlength="200" {% if not health.can_edit %}disabled{% endif %}>
+          {% else %}
+          <input class="form-control form-control-sm" type="text" name="name" value="{{ finding.proposal.name or '' }}" maxlength="40" {% if not health.can_edit %}disabled{% endif %}>
+          {% endif %}
+        </div>
+        {% if health.can_edit %}
+        <button type="submit" class="btn btn-primary btn-sm">{{ t("site.apply_fix") }}</button>
+        {% endif %}
+      </form>
+      {% elif finding.check in ("broken_internal_link", "broken_external_link", "heavy_image") %}
+      {% if finding.check == "broken_external_link" %}
+      <p class="settings-note">{{ t("site.guide_external") }}</p>
+      {% endif %}
+      {% if health.can_edit %}
+      <form method="post" action="{{ url_for('site_finding_apply', finding_id=finding.id) }}">
+        {% if finding.check == "heavy_image" %}
+        <button type="submit" class="btn btn-primary btn-sm">{{ t("site.fix_optimize") }}</button>
+        {% else %}
+        <button type="submit" class="btn btn-primary btn-sm">{{ t("site.fix_unlink") }}</button>
+        {% endif %}
+      </form>
+      {% endif %}
+      {% else %}
+      <p class="settings-note">{{ t(finding.proposal.guidance or "site.guide_form_action") }}</p>
+      {% endif %}
+      {% if health.can_edit %}
+      <form method="post" action="{{ url_for('site_finding_ignore', finding_id=finding.id) }}" class="mt-2">
+        <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("site.ignore") }}</button>
+      </form>
+      {% endif %}
+    </section>
+    {% endfor %}
+
+    {% if health.ignored %}
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("site.ignored") }} ({{ health.ignored_count }})</h2>
+      </div>
+      <div class="table-responsive">
+        <table class="table seo-table align-middle">
+          <tbody>
+            {% for finding in health.ignored %}
+            <tr>
+              <td>
+                <strong>{{ t("site.check_" + finding.check) }}</strong>
+                <div class="settings-note">{{ finding.page }}{% if finding.detail and finding.detail != finding.page %} — {{ finding.detail }}{% endif %}</div>
+              </td>
+              <td class="text-end">
+                {% if health.can_edit %}
+                <form method="post" action="{{ url_for('site_finding_reopen', finding_id=finding.id) }}">
+                  <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("site.reopen") }}</button>
+                </form>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+  </main>
+</div>
+{% endblock %}

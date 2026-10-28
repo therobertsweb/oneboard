@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t("notif.title") }} | ONEBoard{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    {% include "partials/sidebar_brand.html" %}
+    {% set active_page = "notifications" %}
+    {% include "partials/sidebar_nav.html" %}
+  </aside>
+
+  <main class="dashboard-main">
+    <header class="topbar">
+      <div>
+        <p class="page-kicker"><a href="{{ url_for('dashboard') }}">{{ t("nav.dashboard") }}</a></p>
+        <h1>{{ t("notif.title") }}</h1>
+        <p class="settings-note">{{ t("notif.note") }}</p>
+      </div>
+      <div class="topbar-actions">
+        {% include "partials/user_chip.html" %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("nav.logout") }}</button>
+        </form>
+      </div>
+    </header>
+
+    {% include "partials/alerts.html" %}
+
+    {% if not notifications %}
+    <div class="empty-state">{{ t("notif.empty") }}</div>
+    {% endif %}
+
+    {% if unread_count %}
+    <section class="panel">
+      <form method="post" action="{{ url_for('notifications_mark_all_read') }}">
+        <button type="submit" class="btn btn-outline-primary btn-sm">{{ t("notif.mark_all") }} ({{ unread_count }})</button>
+      </form>
+    </section>
+    {% endif %}
+
+    {% for item in notifications %}
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>
+          {% if item.link %}<a href="{{ item.link }}">{{ item.title }}</a>{% else %}{{ item.title }}{% endif %}
+        </h2>
+        {% if not item.read %}
+        <span class="status-pill warn">{{ t("notif.unread") }}</span>
+        {% endif %}
+      </div>
+      <p class="settings-note">{{ t("notif.kind_" + item.kind) }}{% if item.site_name %} · {{ item.site_name }}{% elif item.site_path %} · {{ item.site_path }}{% endif %} · {{ item.created_at }}</p>
+      {% if item.detail %}<p>{{ item.detail }}</p>{% endif %}
+      {% if not item.read %}
+      <form method="post" action="{{ url_for('notifications_mark_read', notification_id=item.id) }}">
+        <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("notif.mark_read") }}</button>
+      </form>
+      {% endif %}
+    </section>
+    {% endfor %}
+  </main>
+</div>
+{% endblock %}

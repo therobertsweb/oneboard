@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+
+{% block title %}{{ team.name }} | ONEBoard{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    {% include "partials/sidebar_brand.html" %}
+    {% set active_page = "teams" %}
+    {% include "partials/sidebar_nav.html" %}
+  </aside>
+
+  <main class="dashboard-main">
+    <header class="topbar">
+      <div>
+        <p class="page-kicker"><a href="{{ url_for('teams_list') }}">{{ t("teams.back_to_teams") }}</a></p>
+        <h1>{{ team.name }}</h1>
+        {% if team.description %}
+        <p class="settings-note">{{ team.description }}</p>
+        {% endif %}
+      </div>
+      <div class="topbar-actions">
+        {% include "partials/user_chip.html" %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("nav.logout") }}</button>
+        </form>
+      </div>
+    </header>
+
+    {% include "partials/alerts.html" %}
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ team.name }}</h2>
+        <span class="status-pill ok">{{ t("teams.role_" + team.my_role) }}</span>
+      </div>
+      {% if team.my_permissions.manage %}
+      <form method="post" action="{{ url_for('team_update', team_id=team.id) }}" class="settings-form">
+        <div class="row g-2">
+          <div class="col-md-5">
+            <label class="form-label" for="team_name">{{ t("teams.name") }}</label>
+            <input class="form-control" type="text" id="team_name" name="name" value="{{ team.name }}" maxlength="80" required>
+          </div>
+          <div class="col-md-5">
+            <label class="form-label" for="team_description">{{ t("teams.description") }}</label>
+            <input class="form-control" type="text" id="team_description" name="description" value="{{ team.description }}" maxlength="500">
+          </div>
+          <div class="col-md-2 d-flex align-items-end">
+            <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("teams.save_changes") }}</button>
+          </div>
+        </div>
+      </form>
+      <div class="d-flex gap-2 mt-3 flex-wrap">
+        {% if team.owner_id != g.user.id %}
+        <form method="post" action="{{ url_for('team_leave', team_id=team.id) }}" onsubmit="return confirm({{ t('teams.confirm_leave')|tojson }});">
+          <button type="submit" class="btn btn-outline-warning btn-sm">{{ t("teams.leave") }}</button>
+        </form>
+        {% endif %}
+        {% if team.owner_id == g.user.id %}
+        <form method="post" action="{{ url_for('team_delete', team_id=team.id) }}" onsubmit="return confirm({{ t('teams.confirm_delete')|tojson }});">
+          <button type="submit" class="btn btn-outline-danger btn-sm">{{ t("teams.delete_team") }}</button>
+        </form>
+        {% endif %}
+      </div>
+      {% elif team.owner_id != g.user.id %}
+      <form method="post" action="{{ url_for('team_leave', team_id=team.id) }}" onsubmit="return confirm({{ t('teams.confirm_leave')|tojson }});">
+        <button type="submit" class="btn btn-outline-warning btn-sm">{{ t("teams.leave") }}</button>
+      </form>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("teams.projects") }}</h2>
+      </div>
+      {% if projects %}
+      <div class="table-responsive">
+        <table class="table seo-table align-middle">
+          <tbody>
+            {% for project in projects %}
+            <tr>
+              <td>
+                <strong>{{ project.name }}</strong>
+                <div class="settings-note">{{ project.path }}</div>
+              </td>
+              <td>
+                {% if not project.exists %}
+                <span class="status-pill warn">{{ t("site.project_missing") }}</span>
+                {% endif %}
+              </td>
+              <td class="text-end">
+                <div class="d-inline-flex gap-2">
+                  <form method="post" action="{{ url_for('site_manager_connect') }}">
+                    <input type="hidden" name="project_id" value="{{ project.id }}">
+                    <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("teams.open_in_studio") }}</button>
+                  </form>
+                  {% if team.my_permissions.manage %}
+                  <form method="post" action="{{ url_for('team_project_remove', team_id=team.id, project_id=project.id) }}" onsubmit="return confirm({{ t('teams.confirm_remove_project')|tojson }});">
+                    <button type="submit" class="btn btn-outline-danger btn-sm">{{ t("teams.remove_project") }}</button>
+                  </form>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state compact">{{ t("teams.no_projects") }}</div>
+      {% endif %}
+      {% if team.my_permissions.manage %}
+      <form method="post" action="{{ url_for('team_project_add', team_id=team.id) }}" class="settings-form mt-3">
+        <label class="form-label">{{ t("teams.add_project") }}</label>
+        <p class="settings-note">{{ t("teams.add_project_note") }}</p>
+        <div class="row g-2">
+          <div class="col-md-5">
+            <select class="form-select" name="project_id">
+              <option value="">—</option>
+              {% for project in personal_projects %}
+              <option value="{{ project.id }}">{{ project.name }} — {{ project.path }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-5">
+            <input class="form-control" type="text" name="path" placeholder="{{ t('teams.project_path') }}">
+          </div>
+          <div class="col-md-2 d-flex align-items-end">
+            <button type="submit" class="btn btn-primary btn-sm">{{ t("teams.add_project") }}</button>
+          </div>
+        </div>
+      </form>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("teams.members") }}</h2>
+      </div>
+      <div class="table-responsive">
+        <table class="table seo-table align-middle">
+          <thead>
+            <tr>
+              <th>{{ t("auth.name") }}</th>
+              <th>{{ t("teams.role") }}</th>
+              <th>{{ t("teams.permissions") }}</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for member in members %}
+            <tr>
+              <td>
+                <strong>{{ member.name }}{% if member.id == g.user.id %} ({{ t("teams.you") }}){% endif %}</strong>
+                <div class="settings-note">{{ member.email }}</div>
+              </td>
+              {% if team.my_permissions.manage and member.role != "owner" %}
+              <td colspan="2">
+                <form method="post" action="{{ url_for('team_member_update', team_id=team.id, user_id=member.id) }}" class="d-flex gap-2 flex-wrap align-items-end">
+                  <div>
+                    <select class="form-select form-select-sm" name="role">
+                      {% for role in member_roles %}
+                      <option value="{{ role }}" {% if role == member.role %}selected{% endif %}>{{ t("teams.role_" + role) }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="d-flex gap-2 flex-wrap">
+                    {% for perm in permissions %}
+                    <label class="form-check form-check-inline">
+                      <input class="form-check-input" type="checkbox" name="perm_{{ perm }}" value="1" {% if member.permissions[perm] %}checked{% endif %} {% if perm == "view" %}disabled{% endif %}>
+                      <span class="form-check-label" title="{{ t('teams.perm_' + perm + '_note') }}">{{ t("teams.perm_" + perm) }}</span>
+                    </label>
+                    {% endfor %}
+                  </div>
+                  <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("teams.save_changes") }}</button>
+                </form>
+              </td>
+              <td class="text-end">
+                <form method="post" action="{{ url_for('team_member_remove', team_id=team.id, user_id=member.id) }}" onsubmit="return confirm({{ t('teams.confirm_remove_member')|tojson }});">
+                  <button type="submit" class="btn btn-outline-danger btn-sm">{{ t("teams.remove") }}</button>
+                </form>
+              </td>
+              {% else %}
+              <td><span class="status-pill ok">{{ t("teams.role_" + member.role) }}</span></td>
+              <td>
+                <span class="settings-note">
+                  {% for perm in permissions %}{% if member.permissions[perm] %}{{ t("teams.perm_" + perm) }}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}
+                </span>
+              </td>
+              <td></td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if team.owner_id == g.user.id and members|length > 1 %}
+      <form method="post" action="{{ url_for('team_transfer', team_id=team.id) }}" class="d-flex gap-2 align-items-end mt-2">
+        <div>
+          <label class="form-label">{{ t("teams.transfer") }}</label>
+          <select class="form-select form-select-sm" name="user_id">
+            {% for member in members %}
+            {% if member.id != g.user.id %}
+            <option value="{{ member.id }}">{{ member.name }} — {{ member.email }}</option>
+            {% endif %}
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit" class="btn btn-outline-warning btn-sm">{{ t("teams.transfer") }}</button>
+      </form>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("teams.invites") }}</h2>
+      </div>
+      {% if team.my_permissions.invite or team.my_permissions.manage %}
+      <form method="post" action="{{ url_for('team_invite_create', team_id=team.id) }}" class="settings-form">
+        <div class="row g-2">
+          <div class="col-md-5">
+            <label class="form-label" for="invite_email">{{ t("teams.invite_email") }}</label>
+            <input class="form-control" type="email" id="invite_email" name="email" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="invite_role">{{ t("teams.invite_role") }}</label>
+            <select class="form-select" id="invite_role" name="role">
+              {% for role in invite_roles %}
+              {% if role != "admin" or team.my_permissions.manage %}
+              <option value="{{ role }}">{{ t("teams.role_" + role) }}</option>
+              {% endif %}
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-3 d-flex align-items-end">
+            <button type="submit" class="btn btn-primary btn-sm">{{ t("teams.send_invite") }}</button>
+          </div>
+        </div>
+      </form>
+      {% endif %}
+      {% if invites %}
+      <div class="table-responsive mt-3">
+        <table class="table seo-table align-middle">
+          <tbody>
+            {% for invite in invites %}
+            <tr>
+              <td>
+                <strong>{{ invite.email }}</strong>
+                <div class="settings-note">{{ t("teams.role_" + invite.role) }} · {{ t("teams.expires") }}: {{ invite.expires_label }}</div>
+              </td>
+              <td class="text-end">
+                {% if team.my_permissions.invite or team.my_permissions.manage %}
+                <form method="post" action="{{ url_for('team_invite_revoke', team_id=team.id, invite_id=invite.id) }}">
+                  <button type="submit" class="btn btn-outline-danger btn-sm">{{ t("teams.revoke") }}</button>
+                </form>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state compact mt-3">{{ t("teams.no_invites") }}</div>
+      {% endif %}
+    </section>
+  </main>
+</div>
+{% endblock %}

@@ -44,10 +44,17 @@
       data-edit-url="{{ url_for('api_social_image_edit') }}"
       data-posts-url="{{ url_for('api_social_buffer_create_post') }}"
       data-history-url="{{ url_for('api_social_buffer_history') }}"
+      data-suggestions-url="{{ url_for('api_social_suggestions') }}"
+      data-ideas-url="{{ url_for('api_social_ideas') }}"
       data-working="{{ t('social.working') }}"
       data-published="{{ t('social.published_ok') }}"
+      data-published-now="{{ t('social.published_now_ok') }}"
       data-draft-saved="{{ t('social.draft_ok') }}"
       data-empty-preview="{{ t('social.preview_empty') }}"
+      data-all-preview="{{ t('social.all_channels_preview') }}"
+      data-partial="{{ t('social.partial_ok') }}"
+      data-use-idea="{{ t('social.use_idea') }}"
+      data-no-suggestions="{{ t('social.suggestions_empty') }}"
       data-no-posts="{{ t('social.no_posts') }}">
 
       <section class="social-grid">
@@ -59,6 +66,18 @@
             <label for="socialChannel" class="form-label">{{ t("social.channel") }}</label>
             <select class="form-select" id="socialChannel">
               <option value="">{{ t("social.loading_channels") }}</option>
+            </select>
+            <div class="form-check social-all-check">
+              <input class="form-check-input" type="checkbox" id="socialAllChannels">
+              <label class="form-check-label" for="socialAllChannels">{{ t("social.all_channels") }}</label>
+            </div>
+          </div>
+          <div class="mb-3" id="socialTypeWrap" hidden>
+            <label for="socialPostType" class="form-label">{{ t("social.post_type") }}</label>
+            <select class="form-select" id="socialPostType">
+              <option value="post">{{ t("social.type_post") }}</option>
+              <option value="story">{{ t("social.type_story") }}</option>
+              <option value="reel">{{ t("social.type_reel") }}</option>
             </select>
           </div>
           <div class="mb-3">
@@ -98,7 +117,8 @@
           <p class="social-status" id="socialStatus" role="status"></p>
           <div class="social-actions">
             <button type="button" class="btn btn-outline-secondary" id="socialDraftBtn">{{ t("social.save_draft") }}</button>
-            <button type="button" class="btn btn-primary" id="socialQueueBtn">{{ t("social.add_queue") }}</button>
+            <button type="button" class="btn btn-outline-secondary" id="socialQueueBtn">{{ t("social.add_queue") }}</button>
+            <button type="button" class="btn btn-primary" id="socialPublishBtn">{{ t("social.publish_now") }}</button>
           </div>
         </article>
 
@@ -123,6 +143,15 @@
 
       <section class="panel social-history-panel">
         <div class="panel-heading">
+          <h2>{{ t("social.suggestions") }}</h2>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="socialIdeasBtn">{{ t("social.generate_ideas") }}</button>
+        </div>
+        <p class="social-hint">{{ t("social.suggestions_note") }} <span id="socialSiteName"></span></p>
+        <div class="social-history-list" id="socialSuggestions"></div>
+      </section>
+
+      <section class="panel social-history-panel">
+        <div class="panel-heading">
           <h2>{{ t("social.history") }}</h2>
         </div>
         <div class="social-history-list" id="socialHistory"></div>
@@ -137,6 +166,9 @@
   if (!app) return;
 
   const channelSelect = document.getElementById("socialChannel");
+  const allCheck = document.getElementById("socialAllChannels");
+  const typeWrap = document.getElementById("socialTypeWrap");
+  const postTypeSelect = document.getElementById("socialPostType");
   const postText = document.getElementById("socialText");
   const assistPrompt = document.getElementById("socialAssistPrompt");
   const assistBtn = document.getElementById("socialAssistBtn");
@@ -161,6 +193,10 @@
   const historyList = document.getElementById("socialHistory");
 
   let attachedImageUrl = "";
+  let loadedChannels = [];
+  let previewSrc = "";
+  let localObjectUrl = "";
+  const publishBtn = document.getElementById("socialPublishBtn");
   const defaultChannelLabel = previewChannel.textContent;
 
   function escapeHtml(value) {
@@ -185,15 +221,27 @@
   }
 
   function updatePreview() {
+    const useAll = allCheck.checked && loadedChannels.length > 0;
+    channelSelect.disabled = allCheck.checked;
     const option = channelSelect.options[channelSelect.selectedIndex];
     const name = option && option.value ? option.textContent.split(" · ")[0] : "";
-    previewChannel.textContent = name || defaultChannelLabel;
-    previewService.textContent = option && option.dataset.service ? option.dataset.service : "";
+    const service = option && option.dataset.service ? option.dataset.service : "";
+    const typedService = (value) => ["facebook", "instagram"].includes((value || "").toLowerCase());
+    const needsType = useAll
+      ? loadedChannels.some((channel) => typedService(channel.service))
+      : typedService(service);
+    typeWrap.hidden = !needsType;
+    previewChannel.textContent = useAll
+      ? app.dataset.allPreview.replace("{count}", String(loadedChannels.length))
+      : (name || defaultChannelLabel);
+    previewService.textContent = useAll
+      ? ""
+      : (needsType ? `${service} · ${postTypeSelect.value}` : service);
     const text = postText.value.trim();
     previewText.textContent = text || app.dataset.emptyPreview;
     previewText.classList.toggle("empty", !text);
-    if (attachedImageUrl) {
-      previewImage.src = attachedImageUrl;
+    if (previewSrc) {
+      previewImage.src = previewSrc;
       previewImage.hidden = false;
     } else {
       previewImage.removeAttribute("src");
@@ -222,11 +270,12 @@
         throw new Error(data.error || "Request failed.");
       }
       channelSelect.innerHTML = "";
+      loadedChannels = Array.isArray(data.channels) ? data.channels : [];
       const placeholder = document.createElement("option");
       placeholder.value = "";
       placeholder.textContent = previewChannel.textContent;
       channelSelect.appendChild(placeholder);
-      data.channels.forEach((channel) => {
+      loadedChannels.forEach((channel) => {
         const option = document.createElement("option");
         option.value = channel.id;
         option.dataset.service = channel.service || "";
@@ -262,7 +311,8 @@
         row.innerHTML =
           `<div class="project-info"><strong>${escapeHtml(post.channel_name || "")}</strong>` +
           `<span class="project-path">${escapeHtml(post.text || "")}</span></div>` +
-          `<span class="status-pill ${pill}">${escapeHtml(post.status || "")}</span>`;
+          `<div class="project-badges"><span class="status-pill info">${escapeHtml(post.post_type || "post")}</span>` +
+          `<span class="status-pill ${pill}">${escapeHtml(post.status || "")}</span></div>`;
         historyList.appendChild(row);
       });
     } catch (error) {
@@ -272,13 +322,11 @@
 
   postText.addEventListener("input", updatePreview);
   channelSelect.addEventListener("change", updatePreview);
+  allCheck.addEventListener("change", updatePreview);
+  postTypeSelect.addEventListener("change", updatePreview);
 
   assistBtn.addEventListener("click", async () => {
     const prompt = assistPrompt.value.trim();
-    if (!prompt) {
-      assistPrompt.focus();
-      return;
-    }
     setBusy(assistBtn, true);
     statusLine.textContent = "";
     try {
@@ -292,11 +340,68 @@
     }
   });
 
-  function setAttachedImage(relativeUrl) {
+  const suggestionsList = document.getElementById("socialSuggestions");
+  const ideasBtn = document.getElementById("socialIdeasBtn");
+  const siteName = document.getElementById("socialSiteName");
+
+  function renderSuggestions(items) {
+    suggestionsList.innerHTML = "";
+    if (!items.length) {
+      suggestionsList.innerHTML = `<p class="browser-empty">${escapeHtml(app.dataset.noSuggestions)}</p>`;
+      return;
+    }
+    items.forEach((item) => {
+      const row = document.createElement("article");
+      row.className = "social-history-row";
+      row.innerHTML =
+        `<div class="project-info"><strong>${escapeHtml(item.title || "")}</strong>` +
+        `<span class="project-path">${escapeHtml(item.prompt || "")}</span></div>` +
+        `<div class="project-badges"><button type="button" class="btn btn-outline-secondary btn-sm">${escapeHtml(app.dataset.useIdea)}</button></div>`;
+      row.querySelector("button").addEventListener("click", () => {
+        assistPrompt.value = item.prompt || "";
+        assistPrompt.focus();
+      });
+      suggestionsList.appendChild(row);
+    });
+  }
+
+  async function loadSuggestions() {
+    try {
+      const response = await fetch(app.dataset.suggestionsUrl);
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Request failed.");
+      }
+      if (siteName && data.site_name) siteName.textContent = `· ${data.site_name}`;
+      renderSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
+    } catch (error) {
+      suggestionsList.innerHTML = `<p class="browser-empty">${escapeHtml(error.message)}</p>`;
+    }
+  }
+
+  ideasBtn.addEventListener("click", async () => {
+    setBusy(ideasBtn, true);
+    statusLine.textContent = "";
+    try {
+      const data = await postJson(app.dataset.ideasUrl, { hint: assistPrompt.value.trim() });
+      renderSuggestions(Array.isArray(data.ideas) ? data.ideas : []);
+    } catch (error) {
+      statusLine.textContent = error.message;
+    } finally {
+      setBusy(ideasBtn, false);
+    }
+  });
+
+  function setAttachedImage(relativeUrl, displayUrl) {
     attachedImageUrl = relativeUrl ? new URL(relativeUrl, window.location.origin).href : "";
+    if (localObjectUrl && attachedImageUrl) {
+      URL.revokeObjectURL(localObjectUrl);
+      localObjectUrl = "";
+    }
+    previewSrc = displayUrl || attachedImageUrl;
     const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/.test(window.location.hostname);
     imageState.hidden = !attachedImageUrl;
-    imageRemove.hidden = !attachedImageUrl;
+    imageRemove.hidden = !attachedImageUrl && !previewSrc;
     editWrap.hidden = !attachedImageUrl;
     localhostNote.hidden = !(attachedImageUrl && isLocal);
     updatePreview();
@@ -321,12 +426,8 @@
   });
 
   const noFileLabel = fileName.textContent;
-  imageFile.addEventListener("change", () => {
-    const picked = imageFile.files && imageFile.files[0];
-    fileName.textContent = picked ? picked.name : noFileLabel;
-  });
 
-  uploadBtn.addEventListener("click", async () => {
+  async function uploadPickedFile() {
     const picked = imageFile.files && imageFile.files[0];
     if (!picked) {
       imageFile.click();
@@ -345,10 +446,23 @@
       setAttachedImage((data.image && data.image.url) || "");
     } catch (error) {
       statusLine.textContent = error.message;
+      setAttachedImage("");
     } finally {
       setBusy(uploadBtn, false);
     }
+  }
+
+  imageFile.addEventListener("change", () => {
+    const picked = imageFile.files && imageFile.files[0];
+    fileName.textContent = picked ? picked.name : noFileLabel;
+    if (!picked) return;
+    if (localObjectUrl) URL.revokeObjectURL(localObjectUrl);
+    localObjectUrl = URL.createObjectURL(picked);
+    setAttachedImage("", localObjectUrl);
+    uploadPickedFile();
   });
+
+  uploadBtn.addEventListener("click", uploadPickedFile);
 
   editBtn.addEventListener("click", async () => {
     const instruction = editPrompt.value.trim();
@@ -376,26 +490,46 @@
     setAttachedImage("");
   });
 
-  async function publish(draft) {
+  async function publish({ draft = false, publishNow = false } = {}) {
+    const useAll = allCheck.checked && loadedChannels.length > 0;
     const channelId = channelSelect.value;
     const text = postText.value.trim();
-    if (!channelId || !text) {
+    if ((!useAll && !channelId) || !text) {
       statusLine.textContent = "";
-      if (!channelId) channelSelect.focus();
+      if (!useAll && !channelId) channelSelect.focus();
       else postText.focus();
       return;
     }
-    const button = draft ? draftBtn : queueBtn;
+    const button = draft ? draftBtn : publishNow ? publishBtn : queueBtn;
     setBusy(button, true);
     statusLine.textContent = "";
     try {
-      await postJson(app.dataset.postsUrl, {
-        channel_id: channelId,
+      const payload = {
         text,
         draft,
+        publish_now: publishNow || undefined,
         image_url: attachedImageUrl || undefined,
-      });
-      statusLine.textContent = draft ? app.dataset.draftSaved : app.dataset.published;
+        post_type: postTypeSelect.value,
+      };
+      if (useAll) {
+        payload.channel_ids = loadedChannels.map((channel) => channel.id);
+      } else {
+        payload.channel_id = channelId;
+      }
+      const data = await postJson(app.dataset.postsUrl, payload);
+      const total = Array.isArray(data.results) ? data.results.length : 1;
+      const failed = typeof data.failed === "number" ? data.failed : 0;
+      if (failed > 0 && total > 1) {
+        const firstError = (data.results.find((item) => !item.ok) || {}).error || "";
+        statusLine.textContent =
+          `${app.dataset.partial.replace("{ok}", String(total - failed)).replace("{total}", String(total))} ${firstError}`.trim();
+      } else if (draft) {
+        statusLine.textContent = app.dataset.draftSaved;
+      } else if (publishNow) {
+        statusLine.textContent = app.dataset.publishedNow;
+      } else {
+        statusLine.textContent = app.dataset.published;
+      }
       await loadHistory();
     } catch (error) {
       statusLine.textContent = error.message;
@@ -404,11 +538,13 @@
     }
   }
 
-  draftBtn.addEventListener("click", () => publish(true));
-  queueBtn.addEventListener("click", () => publish(false));
+  draftBtn.addEventListener("click", () => publish({ draft: true }));
+  queueBtn.addEventListener("click", () => publish({}));
+  publishBtn.addEventListener("click", () => publish({ publishNow: true }));
 
   loadChannels();
   loadHistory();
+  loadSuggestions();
   updatePreview();
 })();
 </script>

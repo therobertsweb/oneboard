@@ -1,8 +1,10 @@
 import base64
 import io
 import os
+import re
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from unittest import mock
 
 
@@ -198,6 +200,9 @@ class BufferTests(unittest.TestCase):
         self.assertIn('id="socialImageBtn"', body)
         self.assertIn('id="socialUploadBtn"', body)
         self.assertIn('id="socialEditBtn"', body)
+        self.assertIn('id="socialPublishBtn"', body)
+        self.assertIn('id="socialPostType"', body)
+        self.assertIn('id="socialAllChannels"', body)
         self.assertIn('href="/social"', body)
 
     def test_social_generate_returns_ai_text(self):
@@ -225,6 +230,159 @@ class BufferTests(unittest.TestCase):
 
         missing = self.client.post("/api/social/generate", json={})
         self.assertEqual(missing.status_code, 400)
+
+    def test_create_post_publish_now_schedules_immediately(self):
+        self.set_buffer_key()
+        seen_queries = []
+
+        def capture(url, payload, headers=None, timeout=30):
+            seen_queries.append((payload or {}).get("query") or "")
+            return buffer_router(url, payload, headers, timeout)
+
+        with mock.patch.object(oneboard, "perform_json_request", side_effect=capture):
+            response = self.client.post(
+                "/api/social/buffer/posts",
+                json={"channel_id": "ch_1", "text": "Out now", "publish_now": True},
+            )
+
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.get_json()["status"], "published")
+        mutations = [query for query in seen_queries if "CreateBufferPost" in query]
+        self.assertEqual(len(mutations), 1)
+        self.assertIn("mode: customScheduled", mutations[0])
+        due_at = re.search(r'dueAt: "([^"]+)"', mutations[0]).group(1)
+        self.assertGreater(
+            datetime.fromisoformat(due_at.replace("Z", "+00:00")),
+            datetime.now(timezone.utc),
+        )
+        with oneboard.app.app_context():
+            posts = oneboard.list_social_posts(self.user_id)
+        self.assertEqual(posts[0]["status"], "published")
+
+    def test_create_post_sends_type_metadata_for_typed_services(self):
+        self.set_buffer_key()
+        seen_queries = []
+
+        def capture(url, payload, headers=None, timeout=30):
+            seen_queries.append((payload or {}).get("query") or "")
+            return buffer_router(url, payload, headers, timeout)
+
+        with mock.patch.object(oneboard, "perform_json_request", side_effect=capture):
+            story = self.client.post(
+                "/api/social/buffer/posts",
+                json={"channel_id": "ch_2", "text": "My story", "post_type": "story"},
+            )
+            plain = self.client.post(
+                "/api/social/buffer/posts",
+                json={"channel_id": "ch_1", "text": "Just a tweet"},
+            )
+
+        self.assertEqual(story.status_code, 200, story.get_data(as_text=True))
+        self.assertEqual(plain.status_code, 200, plain.get_data(as_text=True))
+        mutations = [query for query in seen_queries if "CreateBufferPost" in query]
+        self.assertEqual(len(mutations), 2)
+        self.assertIn("metadata: { instagram: { type: story } }", mutations[0])
+        self.assertNotIn("metadata:", mutations[1])
+        with oneboard.app.app_context():
+            posts = oneboard.list_social_posts(self.user_id)
+        self.assertEqual(posts[0]["post_type"], "post")
+        self.assertEqual(posts[1]["post_type"], "story")
+
+        bad_type = self.client.post(
+            "/api/social/buffer/posts",
+            json={"channel_id": "ch_2", "text": "Hi", "post_type": "carrier-pigeon"},
+        )
+        self.assertEqual(bad_type.status_code, 400)
+
+    def test_create_post_publishes_to_multiple_channels(self):
+        self.set_buffer_key()
+        seen_queries = []
+
+        def capture(url, payload, headers=None, timeout=30):
+            seen_queries.append((payload or {}).get("query") or "")
+            return buffer_router(url, payload, headers, timeout)
+
+        with mock.patch.object(oneboard, "perform_json_request", side_effect=capture):
+            response = self.client.post(
+                "/api/social/buffer/posts",
+                json={"channel_ids": ["ch_1", "ch_2", "ch_1"], "text": "Everywhere"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        body = response.get_json()
+        self.assertEqual(body["published"], 2)
+        self.assertEqual(body["failed"], 0)
+        self.assertEqual(len(body["results"]), 2)
+        mutations = [query for query in seen_queries if "CreateBufferPost" in query]
+        self.assertEqual(len(mutations), 2)
+        self.assertNotIn("metadata:", mutations[0])
+        self.assertIn("metadata: { instagram: { type: post } }", mutations[1])
+        with oneboard.app.app_context():
+            posts = oneboard.list_social_posts(self.user_id)
+        self.assertEqual(len(posts), 2)
+
+    def test_create_post_reports_partial_failures(self):
+        self.set_buffer_key()
+        calls = []
+
+        def flaky(url, payload, headers=None, timeout=30):
+            query = (payload or {}).get("query") or ""
+            if "CreateBufferPost" in query:
+                calls.append(query)
+                if len(calls) == 2:
+                    return {"errors": [{"message": "channel disconnected"}]}
+            return buffer_router(url, payload, headers, timeout)
+
+        with mock.patch.object(oneboard, "perform_json_request", side_effect=flaky):
+            response = self.client.post(
+                "/api/social/buffer/posts",
+                json={"channel_ids": ["ch_1", "ch_2"], "text": "Everywhere"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        body = response.get_json()
+        self.assertEqual(body["published"], 1)
+        self.assertEqual(body["failed"], 1)
+        self.assertIn("channel disconnected", body["results"][1]["error"])
+        with oneboard.app.app_context():
+            posts = oneboard.list_social_posts(self.user_id)
+        self.assertEqual(len(posts), 1)
+
+        def always_fails(url, payload, headers=None, timeout=30):
+            query = (payload or {}).get("query") or ""
+            if "CreateBufferPost" in query:
+                return {"errors": [{"message": "nope"}]}
+            return buffer_router(url, payload, headers, timeout)
+
+        with mock.patch.object(oneboard, "perform_json_request", side_effect=always_fails):
+            failed = self.client.post(
+                "/api/social/buffer/posts",
+                json={"channel_ids": ["ch_1", "ch_2"], "text": "Nowhere"},
+            )
+            unknown = self.client.post(
+                "/api/social/buffer/posts",
+                json={"channel_ids": ["ch_1", "nope"], "text": "Nowhere"},
+            )
+            empty = self.client.post("/api/social/buffer/posts", json={"channel_ids": []})
+
+        self.assertEqual(failed.status_code, 400)
+        self.assertEqual(unknown.status_code, 400)
+        self.assertEqual(empty.status_code, 400)
+
+    def test_create_buffer_post_supports_facebook_types(self):
+        seen = []
+
+        def capture(api_key, query):
+            seen.append(query)
+            return {"createPost": {"post": {"id": "p1", "text": "t", "dueAt": ""}}}
+
+        with mock.patch.object(oneboard, "buffer_graphql", side_effect=capture):
+            oneboard.create_buffer_post(
+                "k", "fb1", "Hello", channel_service="Facebook", post_type="reel"
+            )
+
+        self.assertEqual(len(seen), 1)
+        self.assertIn("metadata: { facebook: { type: reel } }", seen[0])
 
     def test_create_post_with_image_sends_assets(self):
         self.set_buffer_key()
@@ -284,6 +442,14 @@ class BufferTests(unittest.TestCase):
             content_type="multipart/form-data",
         )
         self.assertEqual(fake.status_code, 400)
+
+        jpeg_bytes = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00" + b"\x00" * 64
+        jfif = self.client.post(
+            "/api/social/images/upload",
+            data={"image": (io.BytesIO(jpeg_bytes), "photo.jfif")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(jfif.status_code, 200, jfif.get_data(as_text=True))
 
     def test_social_image_edit_uses_owned_images_only(self):
         png = (

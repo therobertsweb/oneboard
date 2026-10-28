@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t("site.inbox") }} | ONEBoard{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    {% include "partials/sidebar_brand.html" %}
+    {% set active_page = "agency_inbox" %}
+    {% include "partials/sidebar_nav.html" %}
+  </aside>
+
+  <main class="dashboard-main">
+    <header class="topbar">
+      <div>
+        <p class="page-kicker"><a href="{{ url_for('site_manager') }}">{{ t("site.back_to_studio") }}</a></p>
+        <h1>{{ t("site.inbox") }}</h1>
+        <p class="settings-note">{{ t("inbox.note") }}</p>
+      </div>
+      <div class="topbar-actions">
+        {% include "partials/user_chip.html" %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("nav.logout") }}</button>
+        </form>
+      </div>
+    </header>
+
+    {% include "partials/alerts.html" %}
+    {% if team_context and not team_context.permissions.edit %}
+    <div class="alert alert-info">{{ t("teams.read_only") }}</div>
+    {% endif %}
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("inbox.token") }}</h2>
+      </div>
+      {% if tokens %}
+      {% for tok in tokens if not tok.revoked %}
+      <div class="mb-2">
+        <p><strong>{{ tok.label or ("#" ~ tok.id) }}</strong> <span class="settings-note">{{ tok.created_at }}</span></p>
+        <p class="settings-note">{{ t("inbox.snippet") }}</p>
+        <pre class="code-block">{{ ('<form method="post" action="' + url_for('public_form_submit', token=tok.token, _external=True) + '">\n  <input type="text" name="name" />\n  <input type="email" name="email" />\n  <textarea name="message"></textarea>\n  <button type="submit">Send</button>\n</form>') | e }}</pre>
+        {% if not team_context or team_context.permissions.manage %}
+        <form method="post" action="{{ url_for('agency_form_token_revoke', token_id=tok.id) }}">
+          <button type="submit" class="btn btn-outline-danger btn-sm">{{ t("req.revoke") }}</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endfor %}
+      {% else %}
+      <div class="empty-state compact">{{ t("inbox.no_token") }}</div>
+      {% endif %}
+      {% if not team_context or team_context.permissions.manage %}
+      <form method="post" action="{{ url_for('agency_form_token_create') }}" class="d-flex gap-2 flex-wrap align-items-end mt-3">
+        <div>
+          <label class="form-label">{{ t("req.label") }}</label>
+          <input class="form-control form-control-sm" type="text" name="label" maxlength="120">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">{{ t("inbox.new_token") }}</button>
+      </form>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("site.inbox") }}</h2>
+        <div class="d-inline-flex gap-2">
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('agency_inbox') }}">•</a>
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('agency_inbox', status='new') }}">{{ t("inbox.status_new") }}</a>
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('agency_inbox', status='attended') }}">{{ t("inbox.status_attended") }}</a>
+        </div>
+      </div>
+      {% if not messages %}
+      <div class="empty-state compact">{{ t("inbox.no_messages") }}</div>
+      {% endif %}
+      {% for message in messages %}
+      <div class="mb-3 pb-3 border-bottom">
+        <p>
+          <strong>{{ message.name or "—" }}</strong>
+          {% if message.email %}<span class="settings-note">&lt;{{ message.email }}&gt;</span>{% endif %}
+          {% if message.phone %}<span class="settings-note">{{ message.phone }}</span>{% endif %}
+          <span class="status-pill {{ 'ok' if message.status == 'attended' else 'warn' }}">{{ t("inbox.status_" + message.status) }}</span>
+        </p>
+        <p class="settings-note">{{ t("inbox.page") }}: {{ message.page or "—" }} · {{ message.created_at }}</p>
+        <p>{{ message.message }}</p>
+        {% if not team_context or team_context.permissions.edit %}
+        <div class="d-flex gap-2 flex-wrap">
+          {% if message.status == 'new' %}
+          <form method="post" action="{{ url_for('agency_inbox_attend', message_id=message.id) }}">
+            <button type="submit" class="btn btn-outline-primary btn-sm">{{ t("inbox.attend") }}</button>
+          </form>
+          {% else %}
+          <form method="post" action="{{ url_for('agency_inbox_reopen', message_id=message.id) }}">
+            <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("inbox.reopen_in") }}</button>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('agency_inbox_delete', message_id=message.id) }}" onsubmit="return confirm('{{ t('inbox.confirm_delete') }}')">
+            <button type="submit" class="btn btn-outline-danger btn-sm">{{ t("inbox.delete") }}</button>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </section>
+  </main>
+</div>
+{% endblock %}

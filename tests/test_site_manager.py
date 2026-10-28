@@ -69,9 +69,11 @@ class SiteManagerTests(unittest.TestCase):
     def bind_remote_to_current_site(self):
         with oneboard.app.app_context():
             directory = oneboard.require_site_directory(self.user_id)
-            oneboard.execute_db(
-                "UPDATE website_remote_connections SET directory_path = ? WHERE user_id = ?",
-                (os.path.realpath(directory["path"]), self.user_id),
+            remote = oneboard.get_remote_connection_private(self.user_id)
+            self.assertIsNotNone(remote)
+            self.assertEqual(
+                os.path.realpath(remote["directory_path"]),
+                os.path.realpath(directory["path"]),
             )
 
     def test_connect_uses_canonical_path_and_lists_real_files(self):
@@ -612,7 +614,7 @@ class SiteManagerTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         self.assertEqual(
             response.get_json()["notification"],
-            'SEO page "Local SEO Guide" for keyword "local seo" was created in Site Manager. Review it before publishing.',
+            "Página SEO «Local SEO Guide» para la keyword «local seo» creada en Site Manager. Revísala antes de publicar.",
         )
 
     def test_asset_upload_rejects_empty_and_fake_images(self):
@@ -1198,6 +1200,7 @@ class SiteManagerTests(unittest.TestCase):
         self.assertNotIn("--specials", command)
 
     def test_saved_password_is_reused_only_for_the_same_login(self):
+        self.connect()
         with oneboard.app.app_context():
             oneboard.save_remote_connection(
                 self.user_id,
@@ -1257,8 +1260,10 @@ class SiteManagerTests(unittest.TestCase):
                 "key",
                 "",
             )
-            self.assertIsNone(
-                oneboard.get_remote_connection_private(self.user_id)["directory_path"]
+            directory = oneboard.require_site_directory(self.user_id)
+            self.assertEqual(
+                oneboard.get_remote_connection_private(self.user_id)["directory_path"],
+                os.path.realpath(directory["path"]),
             )
 
         sync_count = 0
@@ -1550,6 +1555,7 @@ class SiteManagerTests(unittest.TestCase):
         self.assertFalse(Path(stage_path).exists())
 
     def test_failed_remote_refresh_leaves_active_local_workspace_unchanged(self):
+        self.connect()
         with oneboard.app.app_context():
             oneboard.save_remote_connection(
                 self.user_id,

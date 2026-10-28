@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}#{{ thread.id }} | ONEBoard{% endblock %}
+
+{% block body %}
+<main class="dashboard-main" style="margin: 0 auto; max-width: 900px; padding: 24px;">
+  <header class="topbar">
+    <div>
+      <p class="page-kicker"><a href="{{ url_for('portal_index', token=token) }}">{{ t("portal.back") }}</a></p>
+      <h1>#{{ thread.id }} — {{ thread.client_name or "—" }}</h1>
+    </div>
+  </header>
+
+  {% include "partials/alerts.html" %}
+
+  <section class="panel">
+    <div class="panel-heading">
+      <h2>{{ t("req.status_" + thread.status) }}</h2>
+    </div>
+    <p>{{ thread.message }}</p>
+    {% if thread.selector %}
+    <p class="settings-note"><strong>{{ t("req.selected_element") }}:</strong> <code>{{ thread.selector }}</code> ({{ thread.page }})</p>
+    {% endif %}
+    {% if thread.proposal_text %}
+    <div class="alert alert-info"><strong>{{ t("portal.proposal_from_team") }}:</strong> {{ thread.proposal_text }}</div>
+    {% endif %}
+    {% if thread.status == "proposed" %}
+    <div class="d-flex gap-2" id="portalDecision" data-approve-url="{{ url_for('portal_request_approve', token=token, request_id=thread.id) }}" data-reject-url="{{ url_for('portal_request_reject', token=token, request_id=thread.id) }}">
+      <button type="button" class="btn btn-primary btn-sm" data-decide="approve">{{ t("portal.approve") }}</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" data-decide="reject">{{ t("portal.reject") }}</button>
+    </div>
+    {% elif thread.status == "approved" %}
+    <div class="alert alert-success">{{ t("portal.decided_approved") }}</div>
+    {% elif thread.status == "rejected" %}
+    <div class="alert alert-warning">{{ t("portal.decided_rejected") }}</div>
+    {% endif %}
+    {% if thread.attachments %}
+    <p class="mt-2"><strong>{{ t("req.attachments") }}:</strong></p>
+    <div class="d-flex gap-2 flex-wrap">
+      {% for file in thread.attachments %}
+      <a href="{{ url_for('portal_attachment', token=token, filename=file.filename) }}" target="_blank" rel="noopener">{{ file.original_name }}</a>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-heading">
+      <h2>{{ t("req.comments") }}</h2>
+    </div>
+    {% for comment in thread.comments %}
+    <div class="mb-2">
+      <p class="settings-note"><strong>{{ comment.author_name or ("team" if comment.side == "team" else "client") }}</strong> · {{ comment.created_at }}</p>
+      <p>{{ comment.body }}</p>
+    </div>
+    {% endfor %}
+    <form id="portalCommentForm" data-comment-url="{{ url_for('portal_comment_create', token=token, request_id=thread.id) }}" enctype="multipart/form-data" class="mt-2">
+      <div class="row g-2">
+        <div class="col-md-4">
+          <input class="form-control form-control-sm" type="text" name="client_name" id="portalCommentName" maxlength="80" placeholder="{{ t('portal.your_name') }}">
+        </div>
+        <div class="col-md-8">
+          <textarea class="form-control form-control-sm" name="body" rows="2" maxlength="2000" required></textarea>
+        </div>
+        <div class="col-12">
+          <input class="form-control form-control-sm" type="file" name="attachment" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.pdf">
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm mt-2" id="portalCommentBtn">{{ t("req.add_comment") }}</button>
+    </form>
+  </section>
+</main>
+
+<script>
+(() => {
+  const decision = document.getElementById("portalDecision");
+  if (decision) {
+    decision.querySelectorAll("[data-decide]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const url = button.dataset.decide === "approve" ? decision.dataset.approveUrl : decision.dataset.rejectUrl;
+        button.disabled = true;
+        try {
+          const response = await fetch(url, { method: "POST" });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.error || "Request failed.");
+          window.location.reload();
+        } catch (error) {
+          alert(error.message);
+          button.disabled = false;
+        }
+      });
+    });
+  }
+
+  const form = document.getElementById("portalCommentForm");
+  const nameInput = document.getElementById("portalCommentName");
+  try {
+    nameInput.value = window.localStorage.getItem("oneboard-client-name") || "";
+  } catch (error) { /* private mode */ }
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      window.localStorage.setItem("oneboard-client-name", nameInput.value || "");
+    } catch (error) { /* private mode */ }
+    const button = document.getElementById("portalCommentBtn");
+    button.disabled = true;
+    try {
+      const response = await fetch(form.dataset.commentUrl, { method: "POST", body: new FormData(form) });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "Request failed.");
+      window.location.reload();
+    } catch (error) {
+      alert(error.message);
+      button.disabled = false;
+    }
+  });
+})();
+</script>
+{% endblock %}

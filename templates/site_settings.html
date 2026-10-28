@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t("site.site_settings") }} | ONEBoard{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    {% include "partials/sidebar_brand.html" %}
+    {% set active_page = "site_settings" %}
+    {% include "partials/sidebar_nav.html" %}
+  </aside>
+
+  <main class="dashboard-main">
+    <header class="topbar">
+      <div>
+        <p class="page-kicker"><a href="{{ url_for('site_manager') }}">{{ t("site.back_to_studio") }}</a></p>
+        <h1>{{ t("site.site_settings") }}</h1>
+        <p class="settings-note">{{ site.path }}</p>
+      </div>
+      <div class="topbar-actions">
+        {% include "partials/user_chip.html" %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("nav.logout") }}</button>
+        </form>
+      </div>
+    </header>
+
+    {% include "partials/alerts.html" %}
+    {% if not site.can_edit %}
+    <div class="alert alert-info">{{ t("teams.read_only") }}</div>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('site_settings') }}" class="settings-form">
+      <fieldset {% if not site.can_edit %}disabled{% endif %}>
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>{{ site.display_name or site.name }}</h2>
+        </div>
+        <div class="row g-2">
+          <div class="col-md-6">
+            <label class="form-label" for="display_name">{{ t("site.display_name") }}</label>
+            <input class="form-control" type="text" id="display_name" name="display_name" value="{{ site.display_name }}" maxlength="80">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="client_name">{{ t("site.client_name") }}</label>
+            <input class="form-control" type="text" id="client_name" name="client_name" value="{{ site.client_name }}" maxlength="80">
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>{{ t("site.gsc_property") }}</h2>
+        </div>
+        <p class="settings-note">{{ t("site.gsc_property_note") }}</p>
+        {% if gsc.connected and gsc.sites %}
+        <select class="form-select" name="gsc_property">
+          <option value="">{{ t("site.gsc_property_global") }}</option>
+          {% for entry in gsc.sites %}
+          {% if entry.siteUrl %}
+          <option value="{{ entry.siteUrl }}" {% if entry.siteUrl == site.gsc_property %}selected{% endif %}>{{ entry.siteUrl }}</option>
+          {% endif %}
+          {% endfor %}
+        </select>
+        {% else %}
+        <div class="empty-state compact">{{ t("site.no_gsc") }}</div>
+        {% endif %}
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>{{ t("site.brand") }}</h2>
+        </div>
+        <p class="settings-note">{{ t("site.brand_note") }}</p>
+        <div class="row g-2">
+          <div class="col-md-6">
+            <label class="form-label" for="brand_business_name">{{ t("site.brand_business_name") }}</label>
+            <input class="form-control" type="text" id="brand_business_name" name="brand_business_name" value="{{ site.brand.business_name }}" maxlength="120">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="brand_tagline">{{ t("site.brand_tagline") }}</label>
+            <input class="form-control" type="text" id="brand_tagline" name="brand_tagline" value="{{ site.brand.tagline }}" maxlength="200">
+          </div>
+          <div class="col-12">
+            <label class="form-label" for="brand_services">{{ t("site.brand_services") }}</label>
+            <textarea class="form-control" id="brand_services" name="brand_services" rows="2" maxlength="2000">{{ site.brand.services }}</textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="brand_audience">{{ t("site.brand_audience") }}</label>
+            <textarea class="form-control" id="brand_audience" name="brand_audience" rows="2" maxlength="1000">{{ site.brand.audience }}</textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="brand_tone">{{ t("site.brand_tone") }}</label>
+            <textarea class="form-control" id="brand_tone" name="brand_tone" rows="2" maxlength="500">{{ site.brand.tone }}</textarea>
+          </div>
+        </div>
+        <div class="row g-2 mt-1">
+          <div class="col-md-4">
+            <label class="form-label" for="brand_color_primary">{{ t("site.brand_colors") }} · {{ t("site.brand_color_primary") }}</label>
+            <input class="form-control" type="text" id="brand_color_primary" name="brand_color_primary" value="{{ site.brand.colors.primary }}" maxlength="32" placeholder="#123456">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="brand_color_secondary">{{ t("site.brand_colors") }} · {{ t("site.brand_color_secondary") }}</label>
+            <input class="form-control" type="text" id="brand_color_secondary" name="brand_color_secondary" value="{{ site.brand.colors.secondary }}" maxlength="32">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="brand_color_accent">{{ t("site.brand_colors") }} · {{ t("site.brand_color_accent") }}</label>
+            <input class="form-control" type="text" id="brand_color_accent" name="brand_color_accent" value="{{ site.brand.colors.accent }}" maxlength="32">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="brand_font_headings">{{ t("site.brand_fonts") }} · {{ t("site.brand_font_headings") }}</label>
+            <input class="form-control" type="text" id="brand_font_headings" name="brand_font_headings" value="{{ site.brand.fonts.headings }}" maxlength="80">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="brand_font_body">{{ t("site.brand_fonts") }} · {{ t("site.brand_font_body") }}</label>
+            <input class="form-control" type="text" id="brand_font_body" name="brand_font_body" value="{{ site.brand.fonts.body }}" maxlength="80">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="brand_phone">{{ t("site.brand_phone") }}</label>
+            <input class="form-control" type="text" id="brand_phone" name="brand_phone" value="{{ site.brand.phone }}" maxlength="60">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="brand_email">{{ t("site.brand_email") }}</label>
+            <input class="form-control" type="email" id="brand_email" name="brand_email" value="{{ site.brand.email }}" maxlength="120">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="brand_address">{{ t("site.brand_address") }}</label>
+            <input class="form-control" type="text" id="brand_address" name="brand_address" value="{{ site.brand.address }}" maxlength="300">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="brand_website">{{ t("site.brand_website") }}</label>
+            <input class="form-control" type="text" id="brand_website" name="brand_website" value="{{ site.brand.website }}" maxlength="200">
+          </div>
+          <div class="col-12">
+            <label class="form-label" for="brand_notes">{{ t("site.brand_notes") }}</label>
+            <textarea class="form-control" id="brand_notes" name="brand_notes" rows="3" maxlength="2000">{{ site.brand.notes }}</textarea>
+          </div>
+        </div>
+        <div class="mt-3">
+          <button type="submit" class="btn btn-primary">{{ t("site.save_site") }}</button>
+        </div>
+      </section>
+      </fieldset>
+    </form>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("site.brand_logo") }}</h2>
+      </div>
+      {% if site.brand.logo_url %}
+      <p><img src="{{ site.brand.logo_url }}" alt="{{ t('site.brand_logo') }}" style="max-height: 96px;"></p>
+      {% endif %}
+      {% if site.can_edit %}
+      <form method="post" action="{{ url_for('site_logo_upload') }}" enctype="multipart/form-data" class="d-flex gap-2 align-items-end">
+        <div>
+          <input class="form-control" type="file" name="logo" accept=".png,.jpg,.jpeg,.webp,.gif" required>
+        </div>
+        <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("site.brand_upload_logo") }}</button>
+      </form>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("site.site_images") }}</h2>
+      </div>
+      {% if site.images %}
+      <div class="d-flex gap-2 flex-wrap">
+        {% for image in site.images %}
+        <a href="{{ image.url }}" target="_blank" rel="noopener" title="{{ image.prompt }}">
+          <img src="{{ image.url }}" alt="{{ image.prompt }}" style="height: 96px; object-fit: cover;">
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state compact">{{ t("site.no_site_images") }}</div>
+      {% endif %}
+    </section>
+  </main>
+</div>
+{% endblock %}

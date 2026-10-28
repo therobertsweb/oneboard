@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t("site.compare_title") }} | ONEBoard{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    {% include "partials/sidebar_brand.html" %}
+    {% set active_page = "site_manager" %}
+    {% include "partials/sidebar_nav.html" %}
+  </aside>
+
+  <main class="dashboard-main">
+    <header class="topbar">
+      <div>
+        <p class="page-kicker"><a href="{{ url_for('site_manager') }}">{{ t("site.back_to_studio") }}</a></p>
+        <h1>{{ t("site.compare_title") }}</h1>
+        <p class="settings-note">{{ compare.update.summary }} · {{ compare.update.created_at }}</p>
+      </div>
+      <div class="topbar-actions">
+        {% include "partials/user_chip.html" %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("nav.logout") }}</button>
+        </form>
+      </div>
+    </header>
+
+    {% include "partials/alerts.html" %}
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("site.compare_title") }}</h2>
+        <div class="d-flex gap-2" role="group" aria-label="device">
+          <button type="button" class="btn btn-outline-secondary btn-sm compare-device active" data-device="desktop">{{ t("site.preview_desktop") }}</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm compare-device" data-device="mobile">{{ t("site.preview_mobile") }}</button>
+        </div>
+      </div>
+      <form method="post" action="{{ url_for('site_manager_update_action') }}" class="d-flex gap-2 flex-wrap">
+        <input type="hidden" name="update_id" value="{{ compare.update.id }}">
+        <button type="submit" name="action" value="approve" class="btn btn-outline-secondary btn-sm" data-requires="publish">{{ t("site.approve") }}</button>
+        <button type="submit" name="action" value="publish" class="btn btn-primary btn-sm" data-requires="publish">{{ t("site.publish") }}</button>
+        <button type="submit" name="action" value="restore" class="btn btn-outline-danger btn-sm" data-requires="edit">{{ t("site.restore_files") }}</button>
+      </form>
+    </section>
+
+    {% if not compare.files %}
+    <div class="empty-state">{{ t("site.compare_empty") }}</div>
+    {% endif %}
+
+    {% for file in compare.files %}
+    <section class="panel" data-compare-file>
+      <div class="panel-heading">
+        <h2>{{ file.path }}</h2>
+        <span class="status-pill info">{{ file.change }}</span>
+      </div>
+      {% if file.kind == "visual" %}
+      <div class="row g-3">
+        <div class="col-md-6">
+          <p class="settings-note"><strong>{{ t("site.before") }}</strong></p>
+          {% if file.before_url %}
+          <iframe src="{{ file.before_url }}" title="{{ t('site.before') }} {{ file.path }}" class="compare-frame" data-device-frame loading="lazy"></iframe>
+          {% else %}
+          <div class="empty-state compact">{{ t("site.compare_added") }}</div>
+          {% endif %}
+        </div>
+        <div class="col-md-6">
+          <p class="settings-note"><strong>{{ t("site.after") }}</strong></p>
+          {% if file.after_url %}
+          <iframe src="{{ file.after_url }}" title="{{ t('site.after') }} {{ file.path }}" class="compare-frame" data-device-frame loading="lazy"></iframe>
+          {% else %}
+          <div class="empty-state compact">{{ t("site.compare_removed") }}</div>
+          {% endif %}
+        </div>
+      </div>
+      {% elif file.kind == "text" %}
+      <div class="row g-3" data-text-compare data-before-url="{{ file.before_url or '' }}" data-after-url="{{ file.after_url or '' }}">
+        <div class="col-md-6">
+          <p class="settings-note"><strong>{{ t("site.before") }}</strong></p>
+          {% if file.before_url %}
+          <pre class="compare-code" data-before-code></pre>
+          {% else %}
+          <div class="empty-state compact">{{ t("site.compare_added") }}</div>
+          {% endif %}
+        </div>
+        <div class="col-md-6">
+          <p class="settings-note"><strong>{{ t("site.after") }}</strong></p>
+          {% if file.after_url %}
+          <pre class="compare-code" data-after-code></pre>
+          {% else %}
+          <div class="empty-state compact">{{ t("site.compare_removed") }}</div>
+          {% endif %}
+        </div>
+      </div>
+      {% else %}
+      <div class="empty-state compact">{{ file.change }} · {{ file.path }}</div>
+      {% endif %}
+    </section>
+    {% endfor %}
+  </main>
+</div>
+
+<style>
+.compare-frame { width: 100%; height: 480px; border: 1px solid var(--bs-border-color); border-radius: 6px; background: #fff; }
+.compare-frame[data-device="mobile"] { max-width: 390px; margin: 0 auto; display: block; }
+.compare-code { max-height: 480px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+</style>
+
+<script>
+(() => {
+  const teamContext = {{ team_context | tojson }};
+  const teamReadOnly = {{ t("teams.read_only") | tojson }};
+  if (teamContext && teamContext.permissions) {
+    document.querySelectorAll("[data-requires]").forEach((guarded) => {
+      if (!teamContext.permissions[guarded.dataset.requires]) {
+        guarded.disabled = true;
+        guarded.setAttribute("title", teamReadOnly);
+      }
+    });
+  }
+
+  document.querySelectorAll(".compare-device").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll(".compare-device").forEach((item) => {
+        item.classList.toggle("active", item === button);
+      });
+      const device = button.dataset.device;
+      document.querySelectorAll("[data-device-frame]").forEach((frame) => {
+        if (device === "mobile") {
+          frame.setAttribute("data-device", "mobile");
+        } else {
+          frame.removeAttribute("data-device");
+        }
+      });
+    });
+  });
+
+  document.querySelectorAll("[data-text-compare]").forEach(async (block) => {
+    const jobs = [
+      [block.dataset.beforeUrl, block.querySelector("[data-before-code]")],
+      [block.dataset.afterUrl, block.querySelector("[data-after-code]")],
+    ];
+    for (const [url, target] of jobs) {
+      if (!url || !target) continue;
+      try {
+        const response = await fetch(url);
+        target.textContent = response.ok ? await response.text() : "";
+      } catch (error) {
+        target.textContent = "";
+      }
+    }
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t("portal.title") }} | ONEBoard{% endblock %}
+
+{% block body %}
+<main class="dashboard-main" style="margin: 0 auto; max-width: 1100px; padding: 24px;">
+  <header class="topbar">
+    <div>
+      <p class="page-kicker">ONEBoard</p>
+      <h1>{{ t("portal.title") }}{% if link.label %} — {{ link.label }}{% endif %}</h1>
+    </div>
+  </header>
+
+  {% include "partials/alerts.html" %}
+
+  <section class="panel">
+    <div class="panel-heading">
+      <h2>{{ t("portal.new_request") }}</h2>
+      <button type="button" class="btn btn-outline-primary btn-sm" id="portalAnnotateBtn">{{ t("portal.annotate") }}</button>
+    </div>
+    <p class="settings-note">{{ t("portal.annotate_hint") }}</p>
+    <iframe id="portalFrame" class="preview-frame" title="{{ t('portal.title') }}"
+      src="{{ url_for('portal_preview_file', token=token, filepath='index.html') }}?picker=1"></iframe>
+    <div id="portalSelection" class="mt-2" hidden>
+      <p><strong>{{ t("req.selected_element") }}:</strong> <code id="portalSelectionLabel"></code></p>
+    </div>
+    <form id="portalRequestForm" class="settings-form mt-2" data-create-url="{{ url_for('portal_request_create', token=token) }}">
+      <div class="row g-2">
+        <div class="col-md-4">
+          <label class="form-label">{{ t("portal.your_name") }}</label>
+          <input class="form-control form-control-sm" type="text" name="client_name" id="portalClientName" maxlength="80">
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">{{ t("portal.describe") }}</label>
+          <textarea class="form-control form-control-sm" name="message" rows="2" maxlength="2000" required></textarea>
+        </div>
+        <div class="col-12">
+          <label class="form-label">{{ t("req.attachments") }} <span class="settings-note">({{ t("portal.attach_note") }})</span></label>
+          <input class="form-control form-control-sm" type="file" name="attachment" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.pdf">
+        </div>
+      </div>
+      <input type="hidden" name="page" id="portalFieldPage">
+      <input type="hidden" name="selector" id="portalFieldSelector">
+      <input type="hidden" name="tag" id="portalFieldTag">
+      <input type="hidden" name="text" id="portalFieldText">
+      <input type="hidden" name="html" id="portalFieldHtml">
+      <input type="hidden" name="image_src" id="portalFieldImage">
+      <button type="submit" class="btn btn-primary mt-2" id="portalSendBtn">{{ t("portal.send") }}</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="panel-heading">
+      <h2>{{ t("portal.my_requests") }}</h2>
+    </div>
+    {% if requests %}
+    <div class="table-responsive">
+      <table class="table seo-table align-middle">
+        <tbody>
+          {% for item in requests %}
+          <tr>
+            <td>
+              <strong>{{ item.message[:100] }}</strong>
+              <div class="settings-note">{{ item.client_name }} · {{ item.created_at }}</div>
+            </td>
+            <td><span class="status-pill info">{{ t("req.status_" + item.status) }}</span></td>
+            <td class="text-end">
+              <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('portal_request_detail', token=token, request_id=item.id) }}">{{ t("teams.open_project") }}</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state compact">{{ t("portal.no_requests") }}</div>
+    {% endif %}
+  </section>
+</main>
+
+<script>
+(() => {
+  const frame = document.getElementById("portalFrame");
+  const annotateBtn = document.getElementById("portalAnnotateBtn");
+  const selectionBox = document.getElementById("portalSelection");
+  const selectionLabel = document.getElementById("portalSelectionLabel");
+  const form = document.getElementById("portalRequestForm");
+  const sendBtn = document.getElementById("portalSendBtn");
+  const nameInput = document.getElementById("portalClientName");
+  let annotating = false;
+
+  try {
+    nameInput.value = window.localStorage.getItem("oneboard-client-name") || "";
+  } catch (error) { /* private mode */ }
+
+  annotateBtn.addEventListener("click", () => {
+    annotating = !annotating;
+    annotateBtn.classList.toggle("active", annotating);
+    if (frame.contentWindow) {
+      frame.contentWindow.postMessage({ type: "oneboard-picker-toggle", active: annotating }, window.location.origin);
+    }
+  });
+
+  window.addEventListener("message", (event) => {
+    if (event.origin !== window.location.origin) return;
+    const data = event.data || {};
+    if (data.type !== "oneboard-selection" || !data.selection) return;
+    annotating = false;
+    annotateBtn.classList.remove("active");
+    const selection = data.selection;
+    document.getElementById("portalFieldPage").value = selection.page || "";
+    document.getElementById("portalFieldSelector").value = selection.selector || "";
+    document.getElementById("portalFieldTag").value = selection.tag || "";
+    document.getElementById("portalFieldText").value = selection.text || "";
+    document.getElementById("portalFieldHtml").value = selection.html || "";
+    document.getElementById("portalFieldImage").value = selection.image_src || "";
+    selectionLabel.textContent = selection.selector || "";
+    selectionBox.hidden = false;
+  });
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    sendBtn.disabled = true;
+    try {
+      window.localStorage.setItem("oneboard-client-name", nameInput.value || "");
+    } catch (error) { /* private mode */ }
+    try {
+      const response = await fetch(form.dataset.createUrl, {
+        method: "POST",
+        body: new FormData(form),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "Request failed.");
+      window.location.reload();
+    } catch (error) {
+      alert(error.message);
+      sendBtn.disabled = false;
+    }
+  });
+})();
+</script>
+{% endblock %}

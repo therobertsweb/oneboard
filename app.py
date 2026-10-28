@@ -1,5 +1,6 @@
 import base64
 import email.message
+import html
 import os
 import difflib
 import hashlib
@@ -25,9 +26,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from functools import wraps
+from html.parser import HTMLParser
 
 import click
 from flask import (
@@ -40,11 +43,13 @@ from flask import (
     redirect,
     render_template,
     request,
+    Response,
     session,
     send_file,
     send_from_directory,
     url_for,
 )
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
 
@@ -141,7 +146,393 @@ TRANSLATIONS = {
         "nav.social": "Social",
         "nav.help": "Help",
         "nav.settings": "Settings",
+        "nav.teams": "Teams",
+        "nav.preview": "Preview",
+        "nav.site": "Site",
+        "nav.health": "Pending",
+        "nav.requests": "Requests",
         "nav.logout": "Sign out",
+        "teams.title": "Teams",
+        "teams.kicker": "Collaboration",
+        "teams.subtitle": "Work on the same projects with your team and clients.",
+        "teams.new_team": "New team",
+        "teams.create": "Create team",
+        "teams.name": "Team name",
+        "teams.name_placeholder": "e.g. Web Agency",
+        "teams.description": "Description (optional)",
+        "teams.my_teams": "My teams",
+        "teams.no_teams": "You are not part of any team yet. Create one or accept an invitation.",
+        "teams.members": "Members",
+        "teams.projects": "Team projects",
+        "teams.no_projects": "No shared projects yet. Share one of your personal projects below.",
+        "teams.invites": "Pending invitations",
+        "teams.no_invites": "No pending invitations.",
+        "teams.invite_member": "Invite member",
+        "teams.invite_email": "Email address",
+        "teams.invite_role": "Role",
+        "teams.send_invite": "Send invitation",
+        "teams.copy_link": "Copy link",
+        "teams.link_ready": "Share this link with your teammate:",
+        "teams.revoke": "Revoke",
+        "teams.remove": "Remove",
+        "teams.leave": "Leave team",
+        "teams.delete_team": "Delete team",
+        "teams.confirm_delete": "Delete this team? Shared projects become unshared folders again. Files on disk are kept.",
+        "teams.confirm_remove_member": "Remove this member from the team?",
+        "teams.confirm_leave": "Leave this team? You will lose access to its shared projects.",
+        "teams.transfer": "Transfer ownership",
+        "teams.role": "Role",
+        "teams.permissions": "Permissions",
+        "teams.save_changes": "Save changes",
+        "teams.add_project": "Share a project with the team",
+        "teams.add_project_note": "Pick one of your personal projects, or paste a folder path, to share it with this team.",
+        "teams.project_path": "Folder path",
+        "teams.open_project": "Open",
+        "teams.remove_project": "Unshare",
+        "teams.confirm_remove_project": "Stop sharing this project with the team? Files on disk are kept.",
+        "teams.open_in_studio": "Open in Studio",
+        "teams.pending_invite": "You have been invited to join",
+        "teams.accept_invite": "Accept invitation",
+        "teams.accept_own_invite": "Accept",
+        "teams.login_to_accept": "Sign in or create an account to accept this invitation.",
+        "teams.role_owner": "Owner",
+        "teams.role_admin": "Admin",
+        "teams.role_editor": "Editor",
+        "teams.role_viewer": "Viewer",
+        "teams.role_client": "Client",
+        "teams.role_custom": "Custom",
+        "teams.perm_view": "View",
+        "teams.perm_edit": "Edit",
+        "teams.perm_publish": "Publish",
+        "teams.perm_invite": "Invite",
+        "teams.perm_manage": "Manage",
+        "teams.perm_billing": "Billing",
+        "teams.perm_view_note": "Open and read team projects.",
+        "teams.perm_edit_note": "Change files, run the assistant and the terminal.",
+        "teams.perm_publish_note": "Approve updates and deploy to remote servers.",
+        "teams.perm_invite_note": "Invite new members to the team.",
+        "teams.perm_manage_note": "Change roles, remove members and manage shared projects.",
+        "teams.perm_billing_note": "Reserved for billing management.",
+        "teams.you": "you",
+        "teams.personal": "Personal",
+        "teams.shared": "Shared",
+        "teams.team_project": "Team project",
+        "teams.read_only": "Read-only: your role in this team does not allow this action.",
+        "teams.expires": "Expires",
+        "teams.created": "Created",
+        "teams.back_to_teams": "Back to teams",
+        "flash.team_created": "Team created.",
+        "flash.team_updated": "Team updated.",
+        "flash.team_deleted": "Team deleted.",
+        "flash.team_not_found": "Team not found.",
+        "flash.team_name_required": "Give the team a name.",
+        "flash.invite_sent": "Invitation sent.",
+        "flash.invite_link_ready": "Email is not configured, so copy the invitation link manually.",
+        "flash.invite_revoked": "Invitation revoked.",
+        "flash.invite_invalid": "This invitation is invalid or expired.",
+        "flash.invite_accepted": "You joined the team.",
+        "flash.invite_email_mismatch": "This invitation was sent to another email address.",
+        "flash.already_member": "That user is already a member of this team.",
+        "flash.member_updated": "Member updated.",
+        "flash.member_removed": "Member removed.",
+        "flash.team_member_not_found": "Team member not found.",
+        "flash.left_team": "You left the team.",
+        "flash.owner_transfer_required": "Transfer ownership to another member first.",
+        "flash.cannot_modify_owner": "The team owner cannot be modified. Transfer ownership first.",
+        "flash.team_permission_denied": "Your team role does not allow this action.",
+        "flash.team_project_added": "Project shared with the team.",
+        "flash.team_project_removed": "Project unshared from the team.",
+        "flash.team_project_elsewhere": "This folder is already shared with another team.",
+        "flash.not_team_member": "You are not a member of this team.",
+        "flash.ownership_transferred": "Ownership transferred.",
+        "flash.team_path_forbidden": "This folder belongs to a team you are not part of.",
+        "site.site_settings": "Site settings",
+        "site.display_name": "Site name",
+        "site.client_name": "Client",
+        "site.brand": "Brand memory",
+        "site.brand_note": "Saved once per site. The AI uses it for pages, images, and posts.",
+        "site.brand_business_name": "Business name",
+        "site.brand_tagline": "Tagline",
+        "site.brand_services": "Services and products",
+        "site.brand_audience": "Audience",
+        "site.brand_tone": "Tone of voice",
+        "site.brand_colors": "Brand colors",
+        "site.brand_color_primary": "Primary",
+        "site.brand_color_secondary": "Secondary",
+        "site.brand_color_accent": "Accent",
+        "site.brand_fonts": "Typography",
+        "site.brand_font_headings": "Headings",
+        "site.brand_font_body": "Body",
+        "site.brand_phone": "Phone",
+        "site.brand_email": "Email",
+        "site.brand_address": "Address",
+        "site.brand_website": "Website",
+        "site.brand_notes": "Notes",
+        "site.brand_logo": "Logo",
+        "site.brand_upload_logo": "Upload logo",
+        "site.gsc_property": "Search Console property",
+        "site.gsc_property_note": "Stats for this site only. Leave empty to use your default property.",
+        "site.gsc_property_global": "Use default property",
+        "site.no_gsc": "Connect Search Console to pick a property per site.",
+        "site.site_images": "Site images",
+        "site.no_site_images": "Images generated while this site is open are kept here.",
+        "site.save_site": "Save site settings",
+        "site.back_to_studio": "Back to Studio",
+        "flash.site_saved": "Site settings saved.",
+        "flash.site_brand_invalid": "Brand data is invalid.",
+        "flash.logo_saved": "Logo updated.",
+        "site.tab_preview": "Preview",
+        "site.preview_path": "Page",
+        "site.preview_open": "Open",
+        "site.preview_desktop": "Desktop",
+        "site.preview_mobile": "Mobile",
+        "site.preview_select": "Select element",
+        "site.preview_selecting": "Click an element…",
+        "site.preview_select_hint": "Turn on selection, then click any text, image, or section in the preview.",
+        "site.preview_selected": "Selected",
+        "site.preview_clear": "Clear",
+        "site.preview_prompt_placeholder": "Describe the change, e.g. 'cambia esto a rojo'",
+        "site.preview_apply": "Apply change",
+        "site.preview_no_selection": "No element selected. Describe the change and the AI will locate it.",
+        "site.preview_picker_hint": "Click an element to select it",
+        "site.compare": "Compare",
+        "site.compare_title": "Before / after",
+        "site.before": "Before",
+        "site.after": "After",
+        "site.compare_empty": "No file changes to compare.",
+        "site.compare_added": "New in this update",
+        "site.compare_removed": "Removed in this update",
+        "flash.selection_cleared": "Selection cleared.",
+        "site.health": "Action center",
+        "site.health_note": "Issues found on this site, with concrete fixes you can review and apply.",
+        "site.scan_now": "Scan now",
+        "site.skip_external": "Skip external links (faster)",
+        "site.last_scan": "Last scan",
+        "site.never_scanned": "Not scanned yet.",
+        "site.no_findings": "No open issues. Nice work.",
+        "site.where": "Where",
+        "site.proposal": "Proposed fix",
+        "site.apply_fix": "Apply",
+        "site.ignore": "Ignore",
+        "site.reopen": "Reopen",
+        "site.ignored": "Ignored",
+        "site.severity_error": "Error",
+        "site.severity_warning": "Warning",
+        "site.check_missing_title": "Page without title",
+        "site.check_broken_internal_link": "Broken internal link",
+        "site.check_broken_external_link": "Broken external link",
+        "site.check_heavy_image": "Heavy image",
+        "site.check_missing_alt": "Image without alt text",
+        "site.check_form_no_action": "Form without destination",
+        "site.check_form_no_submit": "Form without submit button",
+        "site.check_form_input_name": "Input without name",
+        "site.fix_title": "Title",
+        "site.fix_alt": "Alt text",
+        "site.fix_unlink": "Remove link, keep text",
+        "site.fix_input_name": "Field name",
+        "site.fix_optimize": "Optimize image",
+        "site.guide_form_action": "This form has nowhere to send its data. Point its action to a working receiver.",
+        "site.guide_form_submit": "This form has no submit button, so visitors cannot send it. Add one in the page.",
+        "site.guide_heavy_no_pillow": "Install Pillow on the server to enable one-click optimization, or compress this image manually.",
+        "site.guide_external": "Verify the URL in a browser. If it moved, update it; otherwise remove the link.",
+        "site.fix_all": "Fix all",
+        "site.fix_all_ai": "Fix all with AI",
+        "site.fix_all_note": "Applies every automatic fix at once (titles, alt text, links, field names, images).",
+        "site.fix_all_ai_note": "The AI reviews every open issue and rewrites the affected pages, including forms without destination or submit button.",
+        "site.explain_ai": "Explain with AI",
+        "site.ai_summary": "AI summary",
+        "site.ai_fix": "Fix with AI",
+        "flash.fixes_applied": "Applied {fixed} automatic fixes ({skipped} need review).",
+        "flash.ai_fixes_applied": "The AI fixed {fixed} issues.",
+        "flash.no_fixes": "There are no open issues to fix.",
+        "flash.scan_done": "Scan finished.",
+        "flash.finding_resolved": "Fix applied.",
+        "flash.finding_ignored": "Issue ignored.",
+        "flash.finding_reopened": "Issue reopened.",
+        "flash.finding_not_found": "Issue not found.",
+        "flash.fix_value_required": "Enter a value for the fix.",
+        "site.requests": "Client requests",
+        "req.links": "Review links",
+        "req.new_link": "New link",
+        "req.label": "Label",
+        "req.label_placeholder": "e.g. Homepage review",
+        "req.expires": "Expires in (days, empty = never)",
+        "req.create_link": "Create link",
+        "req.copy_link": "Copy",
+        "req.revoke": "Revoke",
+        "req.revoked": "Revoked",
+        "req.expired": "Expired",
+        "req.active": "Active",
+        "req.no_links": "No review links yet.",
+        "req.requests": "Requests",
+        "req.no_requests": "No requests yet. Share a review link with your client.",
+        "req.status_open": "Open",
+        "req.status_in_review": "In review",
+        "req.status_proposed": "Proposed",
+        "req.status_approved": "Approved",
+        "req.status_rejected": "Rejected",
+        "req.status_done": "Done",
+        "req.mark_review": "Start review",
+        "req.propose": "Send proposal",
+        "req.proposal": "Proposal",
+        "req.proposal_placeholder": "Describe what you will deliver...",
+        "req.mark_done": "Mark done",
+        "req.reopen_req": "Reopen",
+        "req.comments": "Comments",
+        "req.add_comment": "Comment",
+        "req.attachments": "Attachments",
+        "req.selected_element": "Selected element",
+        "req.delete": "Delete request",
+        "req.confirm_delete": "Delete this request and its comments?",
+        "portal.title": "Review site",
+        "portal.new_request": "New request",
+        "portal.your_name": "Your name",
+        "portal.describe": "Describe the change",
+        "portal.annotate": "Point at something",
+        "portal.annotate_hint": "Click the preview to point at something (optional).",
+        "portal.send": "Send request",
+        "portal.my_requests": "Requests",
+        "portal.no_requests": "No requests yet.",
+        "portal.approve": "Approve proposal",
+        "portal.reject": "Request changes",
+        "portal.decided_approved": "You approved this proposal.",
+        "portal.decided_rejected": "You asked for changes.",
+        "portal.proposal_from_team": "Proposal from the team",
+        "portal.invalid_link": "This review link is invalid, expired, or revoked.",
+        "portal.back": "Back",
+        "portal.attach_note": "Images or PDF, up to 10 MB each.",
+        "flash.link_created": "Review link created.",
+        "flash.link_revoked": "Link revoked.",
+        "flash.request_created": "Request sent.",
+        "flash.request_updated": "Request updated.",
+        "flash.request_deleted": "Request deleted.",
+        "flash.request_not_found": "Request not found.",
+        "flash.comment_added": "Comment added.",
+        "flash.invalid_transition": "That status change is not allowed.",
+        "flash.attachment_invalid": "Attachments must be images or PDF up to 10 MB.",
+        "site.calendar": "Calendar",
+        "cal.new": "New event",
+        "cal.title": "Title",
+        "cal.kind": "Type",
+        "cal.kind_promo": "Promotion",
+        "cal.kind_blog": "Blog post",
+        "cal.kind_prices": "Price update",
+        "cal.kind_note": "Note",
+        "cal.brief": "Brief (what should change)",
+        "cal.starts_on": "Starts on",
+        "cal.ends_on": "Ends (optional)",
+        "cal.create": "Schedule",
+        "cal.save": "Save",
+        "cal.execute": "Implement now with AI",
+        "cal.cancel_ev": "Cancel",
+        "cal.delete": "Delete",
+        "cal.confirm_delete": "Delete this event?",
+        "cal.status_scheduled": "Scheduled",
+        "cal.status_active": "Active",
+        "cal.status_expired": "Expired",
+        "cal.status_done": "Done",
+        "cal.status_cancelled": "Cancelled",
+        "cal.no_events": "No scheduled events.",
+        "cal.implemented_in": "Implemented in update",
+        "flash.event_created": "Event scheduled.",
+        "flash.event_updated": "Event updated.",
+        "flash.event_cancelled": "Event cancelled.",
+        "flash.event_deleted": "Event deleted.",
+        "flash.event_executed": "Change implemented.",
+        "flash.event_not_found": "Event not found.",
+        "flash.invalid_dates": "The end must be after the start.",
+        "site.inbox": "Inbox",
+        "inbox.note": "Form inquiries from this site.",
+        "inbox.token": "Form receiver",
+        "inbox.new_token": "New token",
+        "inbox.snippet": "Paste this into your forms",
+        "inbox.no_token": "Create a token to start receiving.",
+        "inbox.status_new": "New",
+        "inbox.status_attended": "Attended",
+        "inbox.attend": "Mark attended",
+        "inbox.reopen_in": "Reopen",
+        "inbox.delete": "Delete",
+        "inbox.confirm_delete": "Delete this message?",
+        "inbox.no_messages": "No messages yet.",
+        "inbox.from": "From",
+        "inbox.page": "Page",
+        "flash.message_attended": "Marked as attended.",
+        "flash.message_reopened": "Message reopened.",
+        "flash.message_deleted": "Message deleted.",
+        "flash.message_not_found": "Message not found.",
+        "flash.token_created": "Token created.",
+        "flash.token_revoked": "Token revoked.",
+        "site.alerts": "Alerts",
+        "alerts.rules": "Rules",
+        "alerts.new_rule": "New rule",
+        "alerts.name": "Name",
+        "alerts.kind": "Type",
+        "alerts.kind_uptime": "Uptime",
+        "alerts.kind_tls": "TLS certificate",
+        "alerts.kind_publish": "Publish failures",
+        "alerts.target": "URL or host",
+        "alerts.threshold": "Warn when fewer days than",
+        "alerts.create": "Create rule",
+        "alerts.enable": "Enable",
+        "alerts.disable": "Disable",
+        "alerts.delete": "Delete",
+        "alerts.check_now": "Check now",
+        "alerts.list": "Alerts",
+        "alerts.no_alerts": "No alerts.",
+        "alerts.no_rules": "No rules yet. Publish failures are reported automatically.",
+        "alerts.ack": "Acknowledge",
+        "alerts.resolve": "Resolve",
+        "alerts.status_open": "Open",
+        "alerts.status_acked": "Acked",
+        "alerts.status_resolved": "Resolved",
+        "alerts.continuous_note": "For 24/7 monitoring, run `python run.py check-alerts` on a schedule (cron/systemd) on an always-on machine.",
+        "flash.rule_created": "Rule created.",
+        "flash.rule_updated": "Rule updated.",
+        "flash.rule_deleted": "Rule deleted.",
+        "flash.rule_not_found": "Rule not found.",
+        "flash.alert_not_found": "Alert not found.",
+        "flash.alert_updated": "Alert updated.",
+        "flash.check_done": "Check finished.",
+        "site.reports": "Reports",
+        "rep.new": "New report link",
+        "rep.period": "Month",
+        "rep.create": "Create link",
+        "rep.links": "Shared reports",
+        "rep.no_links": "No shared reports.",
+        "rep.revoke": "Revoke",
+        "rep.changes": "Changes made",
+        "rep.visits": "Visits (Search Console)",
+        "rep.clicks": "Clicks",
+        "rep.impressions": "Impressions",
+        "rep.inquiries": "Inquiries received",
+        "rep.issues": "Issues resolved",
+        "rep.requests_done": "Requests completed",
+        "rep.no_gsc": "Connect Search Console for visit stats.",
+        "rep.download": "Download / print PDF",
+        "rep.summary_for": "Monthly summary",
+        "flash.report_created": "Report link created.",
+        "flash.report_revoked": "Report revoked.",
+        "flash.report_not_found": "Report not found.",
+        "nav.inbox": "Inbox",
+        "nav.calendar": "Calendar",
+        "nav.alerts": "Alerts",
+        "nav.reports": "Reports",
+        "nav.notifications": "Notifications",
+        "notif.title": "Notifications",
+        "notif.note": "New messages, requests and alerts across your sites.",
+        "notif.empty": "You're all caught up.",
+        "notif.mark_read": "Mark read",
+        "notif.mark_all": "Mark all read",
+        "notif.unread": "Unread",
+        "notif.kind_inbox": "Inbox",
+        "notif.kind_request": "Request",
+        "notif.kind_alert": "Alert",
+        "flash.notification_not_found": "Notification not found.",
+        "nav.section_main": "Main",
+        "nav.section_site": "Site",
+        "nav.section_team": "Team",
+        "nav.section_system": "System",
+        "dashboard.site_stats": "Showing stats for {site}",
         "language.en": "English",
         "language.es": "Spanish",
         "auth.login_title": "Sign in",
@@ -217,6 +608,17 @@ TRANSLATIONS = {
         "settings.new_password": "New password",
         "settings.confirm_new_password": "Confirm new password",
         "settings.google_note": "Google is managed privately on the server. Use the dashboard connection button to authorize your Search Console account.",
+        "settings.register_note": "Register each URI below exactly (scheme, host, port, and path must match) in Google Cloud Console → Credentials → your OAuth client → Authorized redirect URIs. Then press Verify.",
+        "settings.suggested_uris": "URIs to register",
+        "settings.copy": "Copy",
+        "settings.copied": "Copied.",
+        "settings.verify_google": "Verify with Google",
+        "settings.verify_ok": "Google accepts this URI. You can connect from the dashboard.",
+        "settings.verify_mismatch": "Google does not accept this URI yet. Register it exactly as shown and verify again.",
+        "settings.verify_invalid_client": "Google rejected the OAuth client. Check GOOGLE_CLIENT_ID in the server .env file.",
+        "settings.verify_network": "Could not reach Google to verify. Check the server connection and try again.",
+        "settings.verify_unknown": "Google gave an unexpected answer. Try again.",
+        "settings.verify_missing": "Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to the server .env file first.",
         "settings.muse": "Muse API",
         "settings.muse_note": "Store your Muse API key here so project creation and image generation use your own account.",
         "settings.muse_api_key": "Muse API key",
@@ -232,6 +634,14 @@ TRANSLATIONS = {
         "social.text_required": "Write the post text or describe what to generate.",
         "social.prompt_required": "Describe what the post should say.",
         "social.image_url_invalid": "The image URL must be a complete http(s) address.",
+        "social.post_type_invalid": "Choose a valid post type: post, story, or reel.",
+        "social.post_type": "Publication type",
+        "social.all_channels": "All my channels",
+        "social.all_channels_preview": "All channels ({count})",
+        "social.partial_ok": "{ok} of {total} channels published.",
+        "social.type_post": "Post",
+        "social.type_story": "Story",
+        "social.type_reel": "Reel",
         "social.edit_instruction_required": "Describe how to edit the image.",
         "social.upload_label": "Or upload your own image",
         "social.upload_button": "Upload image",
@@ -260,6 +670,8 @@ TRANSLATIONS = {
         "social.localhost_warning": "Note: Buffer can only fetch the image once this app has a public address. Preview works regardless.",
         "social.save_draft": "Save as draft",
         "social.add_queue": "Add to queue",
+        "social.publish_now": "Publish now",
+        "social.published_now_ok": "Post published.",
         "social.history": "Recent posts",
         "social.no_posts": "No posts yet. Your drafts and queued posts will appear here.",
         "social.key_missing": "Add your Buffer API key to publish.",
@@ -268,6 +680,12 @@ TRANSLATIONS = {
         "social.preview_note": "Preview. Each network renders posts slightly differently.",
         "social.published_ok": "Post added to the Buffer queue.",
         "social.draft_ok": "Draft saved in Buffer.",
+        "social.suggestions": "Ideas from your site",
+        "social.suggestions_note": "Based on your connected website: brand, pages, and upcoming events.",
+        "social.suggestions_empty": "Connect a site in Studio to get ideas based on its content.",
+        "social.generate_ideas": "Generate ideas with AI",
+        "social.use_idea": "Use",
+        "social.from_site": "From your site",
         "settings.client_id": "Client ID",
         "settings.client_secret": "Client Secret",
         "settings.redirect_uri": "Redirect URI",
@@ -495,7 +913,7 @@ TRANSLATIONS = {
         "flash.current_password_invalid": "The current password is incorrect.",
         "flash.email_invalid": "Enter a valid email.",
         "flash.password_update_mismatch": "The new passwords do not match.",
-        "flash.avatar_invalid": "Upload a PNG, JPG, JPEG, GIF, or WEBP image.",
+        "flash.avatar_invalid": "Upload a PNG, JPG, JPEG, JFIF, GIF, or WEBP image.",
         "flash.image_invalid": "The image is invalid or unavailable.",
         "flash.asset_required": "Choose an image to upload.",
         "flash.scan_failed": "The scan could not be completed: {error}",
@@ -511,6 +929,7 @@ TRANSLATIONS = {
         "flash.select_property": "Select a Search Console property.",
         "flash.property_selected": "Property selected successfully.",
         "flash.search_console_disconnected": "Google Search Console was disconnected.",
+        "flash.search_console_revoke_failed": "Disconnected locally, but Google could not revoke the token: {error}",
         "flash.logout_success": "Signed out successfully.",
         "flash.site_path_required": "Enter a website directory path.",
         "flash.site_path_missing": "The directory does not exist.",
@@ -575,7 +994,393 @@ TRANSLATIONS = {
         "nav.social": "Redes",
         "nav.help": "Ayuda",
         "nav.settings": "Configuración",
+        "nav.teams": "Equipos",
+        "nav.preview": "Vista previa",
+        "nav.site": "Sitio",
+        "nav.health": "Pendientes",
+        "nav.requests": "Solicitudes",
         "nav.logout": "Salir",
+        "teams.title": "Equipos",
+        "teams.kicker": "Colaboración",
+        "teams.subtitle": "Trabaja en los mismos proyectos con tu equipo y tus clientes.",
+        "teams.new_team": "Nuevo equipo",
+        "teams.create": "Crear equipo",
+        "teams.name": "Nombre del equipo",
+        "teams.name_placeholder": "p. ej. Agencia Web",
+        "teams.description": "Descripción (opcional)",
+        "teams.my_teams": "Mis equipos",
+        "teams.no_teams": "Aún no formas parte de ningún equipo. Crea uno o acepta una invitación.",
+        "teams.members": "Miembros",
+        "teams.projects": "Proyectos del equipo",
+        "teams.no_projects": "Aún no hay proyectos compartidos. Comparte uno de tus proyectos personales abajo.",
+        "teams.invites": "Invitaciones pendientes",
+        "teams.no_invites": "No hay invitaciones pendientes.",
+        "teams.invite_member": "Invitar miembro",
+        "teams.invite_email": "Correo electrónico",
+        "teams.invite_role": "Rol",
+        "teams.send_invite": "Enviar invitación",
+        "teams.copy_link": "Copiar enlace",
+        "teams.link_ready": "Comparte este enlace con tu compañero:",
+        "teams.revoke": "Revocar",
+        "teams.remove": "Quitar",
+        "teams.leave": "Salir del equipo",
+        "teams.delete_team": "Eliminar equipo",
+        "teams.confirm_delete": "¿Eliminar este equipo? Los proyectos compartidos volverán a ser carpetas sin compartir. Los archivos se conservan.",
+        "teams.confirm_remove_member": "¿Quitar a este miembro del equipo?",
+        "teams.confirm_leave": "¿Salir del equipo? Perderás acceso a sus proyectos compartidos.",
+        "teams.transfer": "Transferir propiedad",
+        "teams.role": "Rol",
+        "teams.permissions": "Permisos",
+        "teams.save_changes": "Guardar cambios",
+        "teams.add_project": "Compartir un proyecto con el equipo",
+        "teams.add_project_note": "Elige uno de tus proyectos personales, o pega una ruta de carpeta, para compartirlo con este equipo.",
+        "teams.project_path": "Ruta de la carpeta",
+        "teams.open_project": "Abrir",
+        "teams.remove_project": "Dejar de compartir",
+        "teams.confirm_remove_project": "¿Dejar de compartir este proyecto con el equipo? Los archivos se conservan.",
+        "teams.open_in_studio": "Abrir en Studio",
+        "teams.pending_invite": "Te han invitado a unirte a",
+        "teams.accept_invite": "Aceptar invitación",
+        "teams.accept_own_invite": "Aceptar",
+        "teams.login_to_accept": "Inicia sesión o crea una cuenta para aceptar esta invitación.",
+        "teams.role_owner": "Propietario",
+        "teams.role_admin": "Administrador",
+        "teams.role_editor": "Editor",
+        "teams.role_viewer": "Lector",
+        "teams.role_client": "Cliente",
+        "teams.role_custom": "Personalizado",
+        "teams.perm_view": "Ver",
+        "teams.perm_edit": "Editar",
+        "teams.perm_publish": "Publicar",
+        "teams.perm_invite": "Invitar",
+        "teams.perm_manage": "Gestionar",
+        "teams.perm_billing": "Facturación",
+        "teams.perm_view_note": "Abrir y leer los proyectos del equipo.",
+        "teams.perm_edit_note": "Cambiar archivos, usar el asistente y la terminal.",
+        "teams.perm_publish_note": "Aprobar cambios y desplegar a servidores remotos.",
+        "teams.perm_invite_note": "Invitar nuevos miembros al equipo.",
+        "teams.perm_manage_note": "Cambiar roles, quitar miembros y gestionar proyectos compartidos.",
+        "teams.perm_billing_note": "Reservado para la gestión de facturación.",
+        "teams.you": "tú",
+        "teams.personal": "Personal",
+        "teams.shared": "Compartido",
+        "teams.team_project": "Proyecto de equipo",
+        "teams.read_only": "Solo lectura: tu rol en este equipo no permite esta acción.",
+        "teams.expires": "Expira",
+        "teams.created": "Creado",
+        "teams.back_to_teams": "Volver a equipos",
+        "flash.team_created": "Equipo creado.",
+        "flash.team_updated": "Equipo actualizado.",
+        "flash.team_deleted": "Equipo eliminado.",
+        "flash.team_not_found": "Equipo no encontrado.",
+        "flash.team_name_required": "Ponle un nombre al equipo.",
+        "flash.invite_sent": "Invitación enviada.",
+        "flash.invite_link_ready": "El correo no está configurado, copia el enlace de invitación manualmente.",
+        "flash.invite_revoked": "Invitación revocada.",
+        "flash.invite_invalid": "Esta invitación no es válida o expiró.",
+        "flash.invite_accepted": "Te uniste al equipo.",
+        "flash.invite_email_mismatch": "Esta invitación se envió a otra dirección de correo.",
+        "flash.already_member": "Ese usuario ya es miembro de este equipo.",
+        "flash.member_updated": "Miembro actualizado.",
+        "flash.member_removed": "Miembro eliminado.",
+        "flash.team_member_not_found": "Miembro del equipo no encontrado.",
+        "flash.left_team": "Saliste del equipo.",
+        "flash.owner_transfer_required": "Primero transfiere la propiedad a otro miembro.",
+        "flash.cannot_modify_owner": "El propietario del equipo no se puede modificar. Transfiere la propiedad primero.",
+        "flash.team_permission_denied": "Tu rol en el equipo no permite esta acción.",
+        "flash.team_project_added": "Proyecto compartido con el equipo.",
+        "flash.team_project_removed": "Proyecto sin compartir del equipo.",
+        "flash.team_project_elsewhere": "Esta carpeta ya está compartida con otro equipo.",
+        "flash.not_team_member": "No eres miembro de este equipo.",
+        "flash.ownership_transferred": "Propiedad transferida.",
+        "flash.team_path_forbidden": "Esta carpeta pertenece a un equipo del que no formas parte.",
+        "site.site_settings": "Ajustes del sitio",
+        "site.display_name": "Nombre del sitio",
+        "site.client_name": "Cliente",
+        "site.brand": "Memoria de marca",
+        "site.brand_note": "Se guarda una vez por sitio. La IA lo usa para páginas, imágenes y publicaciones.",
+        "site.brand_business_name": "Nombre del negocio",
+        "site.brand_tagline": "Eslogan",
+        "site.brand_services": "Servicios y productos",
+        "site.brand_audience": "Público",
+        "site.brand_tone": "Tono de comunicación",
+        "site.brand_colors": "Colores de marca",
+        "site.brand_color_primary": "Primario",
+        "site.brand_color_secondary": "Secundario",
+        "site.brand_color_accent": "Acento",
+        "site.brand_fonts": "Tipografías",
+        "site.brand_font_headings": "Titulares",
+        "site.brand_font_body": "Texto",
+        "site.brand_phone": "Teléfono",
+        "site.brand_email": "Correo",
+        "site.brand_address": "Dirección",
+        "site.brand_website": "Sitio web",
+        "site.brand_notes": "Notas",
+        "site.brand_logo": "Logotipo",
+        "site.brand_upload_logo": "Subir logotipo",
+        "site.gsc_property": "Propiedad de Search Console",
+        "site.gsc_property_note": "Estadísticas solo para este sitio. Déjalo vacío para usar tu propiedad predeterminada.",
+        "site.gsc_property_global": "Usar propiedad predeterminada",
+        "site.no_gsc": "Conecta Search Console para elegir una propiedad por sitio.",
+        "site.site_images": "Imágenes del sitio",
+        "site.no_site_images": "Las imágenes generadas con este sitio abierto se guardan aquí.",
+        "site.save_site": "Guardar ajustes",
+        "site.back_to_studio": "Volver a Studio",
+        "flash.site_saved": "Ajustes del sitio guardados.",
+        "flash.site_brand_invalid": "Los datos de marca no son válidos.",
+        "flash.logo_saved": "Logotipo actualizado.",
+        "site.tab_preview": "Vista previa",
+        "site.preview_path": "Página",
+        "site.preview_open": "Abrir",
+        "site.preview_desktop": "Computadora",
+        "site.preview_mobile": "Móvil",
+        "site.preview_select": "Seleccionar elemento",
+        "site.preview_selecting": "Haz clic en un elemento…",
+        "site.preview_select_hint": "Activa la selección y haz clic en un texto, imagen o sección de la vista previa.",
+        "site.preview_selected": "Seleccionado",
+        "site.preview_clear": "Limpiar",
+        "site.preview_prompt_placeholder": "Describe el cambio, p. ej. «cambia esto a rojo»",
+        "site.preview_apply": "Aplicar cambio",
+        "site.preview_no_selection": "Sin elemento seleccionado. Describe el cambio y la IA lo localizará.",
+        "site.preview_picker_hint": "Haz clic en un elemento para seleccionarlo",
+        "site.compare": "Comparar",
+        "site.compare_title": "Antes / después",
+        "site.before": "Antes",
+        "site.after": "Después",
+        "site.compare_empty": "No hay cambios de archivos para comparar.",
+        "site.compare_added": "Nuevo en este cambio",
+        "site.compare_removed": "Eliminado en este cambio",
+        "flash.selection_cleared": "Selección eliminada.",
+        "site.health": "Centro de pendientes",
+        "site.health_note": "Problemas de este sitio, con soluciones concretas para revisar y aplicar.",
+        "site.scan_now": "Analizar ahora",
+        "site.skip_external": "Omitir enlaces externos (más rápido)",
+        "site.last_scan": "Último análisis",
+        "site.never_scanned": "Aún sin analizar.",
+        "site.no_findings": "Sin pendientes. Buen trabajo.",
+        "site.where": "Dónde",
+        "site.proposal": "Solución propuesta",
+        "site.apply_fix": "Aplicar",
+        "site.ignore": "Ignorar",
+        "site.reopen": "Reabrir",
+        "site.ignored": "Ignorados",
+        "site.severity_error": "Error",
+        "site.severity_warning": "Aviso",
+        "site.check_missing_title": "Página sin título",
+        "site.check_broken_internal_link": "Enlace interno roto",
+        "site.check_broken_external_link": "Enlace externo roto",
+        "site.check_heavy_image": "Imagen pesada",
+        "site.check_missing_alt": "Imagen sin texto alternativo",
+        "site.check_form_no_action": "Formulario sin destino",
+        "site.check_form_no_submit": "Formulario sin botón de envío",
+        "site.check_form_input_name": "Campo sin nombre",
+        "site.fix_title": "Título",
+        "site.fix_alt": "Texto alternativo",
+        "site.fix_unlink": "Quitar enlace, dejar texto",
+        "site.fix_input_name": "Nombre del campo",
+        "site.fix_optimize": "Optimizar imagen",
+        "site.guide_form_action": "Este formulario no tiene a dónde enviar sus datos. Apunta su action a un receptor válido.",
+        "site.guide_form_submit": "Este formulario no tiene botón de envío, así que nadie puede enviarlo. Añade uno en la página.",
+        "site.guide_heavy_no_pillow": "Instala Pillow en el servidor para optimizar con un clic, o comprime esta imagen manualmente.",
+        "site.guide_external": "Verifica la URL en un navegador. Si cambió, actualízala; si no, quita el enlace.",
+        "site.fix_all": "Reparar todo",
+        "site.fix_all_ai": "Reparar todo con IA",
+        "site.fix_all_note": "Aplica todas las correcciones automáticas a la vez (títulos, textos alternativos, enlaces, nombres de campos, imágenes).",
+        "site.fix_all_ai_note": "La IA revisa todos los problemas abiertos y reescribe las páginas afectadas, incluyendo formularios sin destino o sin botón de envío.",
+        "site.explain_ai": "Explicar con IA",
+        "site.ai_summary": "Resumen de la IA",
+        "site.ai_fix": "Reparar con IA",
+        "flash.fixes_applied": "Se aplicaron {fixed} correcciones automáticas ({skipped} necesitan revisión).",
+        "flash.ai_fixes_applied": "La IA corrigió {fixed} problemas.",
+        "flash.no_fixes": "No hay problemas abiertos que corregir.",
+        "flash.scan_done": "Análisis terminado.",
+        "flash.finding_resolved": "Solución aplicada.",
+        "flash.finding_ignored": "Pendiente ignorado.",
+        "flash.finding_reopened": "Pendiente reabierto.",
+        "flash.finding_not_found": "Pendiente no encontrado.",
+        "flash.fix_value_required": "Ingresa un valor para la solución.",
+        "site.requests": "Solicitudes de clientes",
+        "req.links": "Enlaces de revisión",
+        "req.new_link": "Nuevo enlace",
+        "req.label": "Etiqueta",
+        "req.label_placeholder": "p. ej. Revisión inicio",
+        "req.expires": "Expira en (días, vacío = nunca)",
+        "req.create_link": "Crear enlace",
+        "req.copy_link": "Copiar",
+        "req.revoke": "Revocar",
+        "req.revoked": "Revocado",
+        "req.expired": "Expirado",
+        "req.active": "Activo",
+        "req.no_links": "Aún no hay enlaces de revisión.",
+        "req.requests": "Solicitudes",
+        "req.no_requests": "Aún no hay solicitudes. Comparte un enlace de revisión con tu cliente.",
+        "req.status_open": "Abierta",
+        "req.status_in_review": "En revisión",
+        "req.status_proposed": "Propuesta",
+        "req.status_approved": "Aprobada",
+        "req.status_rejected": "Rechazada",
+        "req.status_done": "Hecha",
+        "req.mark_review": "Empezar revisión",
+        "req.propose": "Enviar propuesta",
+        "req.proposal": "Propuesta",
+        "req.proposal_placeholder": "Describe lo que entregarás...",
+        "req.mark_done": "Marcar hecha",
+        "req.reopen_req": "Reabrir",
+        "req.comments": "Comentarios",
+        "req.add_comment": "Comentar",
+        "req.attachments": "Adjuntos",
+        "req.selected_element": "Elemento seleccionado",
+        "req.delete": "Eliminar solicitud",
+        "req.confirm_delete": "¿Eliminar esta solicitud y sus comentarios?",
+        "portal.title": "Revisar sitio",
+        "portal.new_request": "Nueva solicitud",
+        "portal.your_name": "Tu nombre",
+        "portal.describe": "Describe el cambio",
+        "portal.annotate": "Señalar algo",
+        "portal.annotate_hint": "Haz clic en la vista para señalar algo (opcional).",
+        "portal.send": "Enviar solicitud",
+        "portal.my_requests": "Solicitudes",
+        "portal.no_requests": "Aún no hay solicitudes.",
+        "portal.approve": "Aprobar propuesta",
+        "portal.reject": "Pedir cambios",
+        "portal.decided_approved": "Aprobaste esta propuesta.",
+        "portal.decided_rejected": "Pediste cambios.",
+        "portal.proposal_from_team": "Propuesta del equipo",
+        "portal.invalid_link": "Este enlace de revisión no es válido, expiró o fue revocado.",
+        "portal.back": "Volver",
+        "portal.attach_note": "Imágenes o PDF, hasta 10 MB cada uno.",
+        "flash.link_created": "Enlace de revisión creado.",
+        "flash.link_revoked": "Enlace revocado.",
+        "flash.request_created": "Solicitud enviada.",
+        "flash.request_updated": "Solicitud actualizada.",
+        "flash.request_deleted": "Solicitud eliminada.",
+        "flash.request_not_found": "Solicitud no encontrada.",
+        "flash.comment_added": "Comentario añadido.",
+        "flash.invalid_transition": "Ese cambio de estado no está permitido.",
+        "flash.attachment_invalid": "Los adjuntos deben ser imágenes o PDF de hasta 10 MB.",
+        "site.calendar": "Calendario",
+        "cal.new": "Nuevo evento",
+        "cal.title": "Título",
+        "cal.kind": "Tipo",
+        "cal.kind_promo": "Promoción",
+        "cal.kind_blog": "Blog",
+        "cal.kind_prices": "Precios",
+        "cal.kind_note": "Nota",
+        "cal.brief": "Brief (qué debe cambiar)",
+        "cal.starts_on": "Empieza",
+        "cal.ends_on": "Termina (opcional)",
+        "cal.create": "Programar",
+        "cal.save": "Guardar",
+        "cal.execute": "Implementar ahora con IA",
+        "cal.cancel_ev": "Cancelar",
+        "cal.delete": "Eliminar",
+        "cal.confirm_delete": "¿Eliminar este evento?",
+        "cal.status_scheduled": "Programado",
+        "cal.status_active": "Activo",
+        "cal.status_expired": "Expirado",
+        "cal.status_done": "Hecho",
+        "cal.status_cancelled": "Cancelado",
+        "cal.no_events": "Sin eventos programados.",
+        "cal.implemented_in": "Implementado en el cambio",
+        "flash.event_created": "Evento programado.",
+        "flash.event_updated": "Evento actualizado.",
+        "flash.event_cancelled": "Evento cancelado.",
+        "flash.event_deleted": "Evento eliminado.",
+        "flash.event_executed": "Cambio implementado.",
+        "flash.event_not_found": "Evento no encontrado.",
+        "flash.invalid_dates": "El fin debe ser posterior al inicio.",
+        "site.inbox": "Bandeja",
+        "inbox.note": "Consultas de formularios de este sitio.",
+        "inbox.token": "Receptor de formularios",
+        "inbox.new_token": "Nuevo token",
+        "inbox.snippet": "Pega esto en tus formularios",
+        "inbox.no_token": "Crea un token para empezar a recibir.",
+        "inbox.status_new": "Nueva",
+        "inbox.status_attended": "Atendida",
+        "inbox.attend": "Marcar atendida",
+        "inbox.reopen_in": "Reabrir",
+        "inbox.delete": "Eliminar",
+        "inbox.confirm_delete": "¿Eliminar este mensaje?",
+        "inbox.no_messages": "Aún no hay mensajes.",
+        "inbox.from": "De",
+        "inbox.page": "Página",
+        "flash.message_attended": "Marcada como atendida.",
+        "flash.message_reopened": "Mensaje reabierto.",
+        "flash.message_deleted": "Mensaje eliminado.",
+        "flash.message_not_found": "Mensaje no encontrado.",
+        "flash.token_created": "Token creado.",
+        "flash.token_revoked": "Token revocado.",
+        "site.alerts": "Alertas",
+        "alerts.rules": "Reglas",
+        "alerts.new_rule": "Nueva regla",
+        "alerts.name": "Nombre",
+        "alerts.kind": "Tipo",
+        "alerts.kind_uptime": "Disponibilidad",
+        "alerts.kind_tls": "Certificado TLS",
+        "alerts.kind_publish": "Fallos de publicación",
+        "alerts.target": "URL o host",
+        "alerts.threshold": "Avisar con menos días de",
+        "alerts.create": "Crear regla",
+        "alerts.enable": "Activar",
+        "alerts.disable": "Desactivar",
+        "alerts.delete": "Eliminar",
+        "alerts.check_now": "Comprobar ahora",
+        "alerts.list": "Alertas",
+        "alerts.no_alerts": "Sin alertas.",
+        "alerts.no_rules": "Sin reglas. Los fallos de publicación se reportan solos.",
+        "alerts.ack": "Enterado",
+        "alerts.resolve": "Resolver",
+        "alerts.status_open": "Abierta",
+        "alerts.status_acked": "Vista",
+        "alerts.status_resolved": "Resuelta",
+        "alerts.continuous_note": "Para monitoreo 24/7, ejecuta `python run.py check-alerts` programado (cron/systemd) en una máquina siempre encendida.",
+        "flash.rule_created": "Regla creada.",
+        "flash.rule_updated": "Regla actualizada.",
+        "flash.rule_deleted": "Regla eliminada.",
+        "flash.rule_not_found": "Regla no encontrada.",
+        "flash.alert_not_found": "Alerta no encontrada.",
+        "flash.alert_updated": "Alerta actualizada.",
+        "flash.check_done": "Comprobación terminada.",
+        "site.reports": "Informes",
+        "rep.new": "Nuevo enlace de informe",
+        "rep.period": "Mes",
+        "rep.create": "Crear enlace",
+        "rep.links": "Informes compartidos",
+        "rep.no_links": "Sin informes compartidos.",
+        "rep.revoke": "Revocar",
+        "rep.changes": "Cambios realizados",
+        "rep.visits": "Visitas (Search Console)",
+        "rep.clicks": "Clics",
+        "rep.impressions": "Impresiones",
+        "rep.inquiries": "Consultas recibidas",
+        "rep.issues": "Problemas resueltos",
+        "rep.requests_done": "Solicitudes completadas",
+        "rep.no_gsc": "Conecta Search Console para estadísticas de visitas.",
+        "rep.download": "Descargar / imprimir PDF",
+        "rep.summary_for": "Resumen mensual",
+        "flash.report_created": "Enlace de informe creado.",
+        "flash.report_revoked": "Informe revocado.",
+        "flash.report_not_found": "Informe no encontrado.",
+        "nav.inbox": "Bandeja",
+        "nav.calendar": "Calendario",
+        "nav.alerts": "Alertas",
+        "nav.reports": "Informes",
+        "nav.notifications": "Notificaciones",
+        "notif.title": "Notificaciones",
+        "notif.note": "Mensajes, solicitudes y alertas nuevas de tus sitios.",
+        "notif.empty": "Estás al día.",
+        "notif.mark_read": "Marcar leída",
+        "notif.mark_all": "Marcar todas",
+        "notif.unread": "Sin leer",
+        "notif.kind_inbox": "Bandeja",
+        "notif.kind_request": "Solicitud",
+        "notif.kind_alert": "Alerta",
+        "flash.notification_not_found": "Notificación no encontrada.",
+        "nav.section_main": "Principal",
+        "nav.section_site": "Sitio",
+        "nav.section_team": "Equipo",
+        "nav.section_system": "Sistema",
+        "dashboard.site_stats": "Mostrando estadísticas de {site}",
         "language.en": "Inglés",
         "language.es": "Español",
         "auth.login_title": "Iniciar sesión",
@@ -651,6 +1456,17 @@ TRANSLATIONS = {
         "settings.new_password": "Nueva contraseña",
         "settings.confirm_new_password": "Confirmar nueva contraseña",
         "settings.google_note": "La conexión con Google se gestiona de forma privada en el servidor. Usa el botón de conexión en el dashboard para autorizar tu cuenta de Search Console.",
+        "settings.register_note": "Registra cada URI de abajo de forma exacta (esquema, host, puerto y ruta deben coincidir) en Google Cloud Console → Credenciales → tu cliente OAuth → URIs de redirección autorizados. Luego pulsa Verificar.",
+        "settings.suggested_uris": "URIs a registrar",
+        "settings.copy": "Copiar",
+        "settings.copied": "Copiado.",
+        "settings.verify_google": "Verificar con Google",
+        "settings.verify_ok": "Google acepta este URI. Ya puedes conectar desde el dashboard.",
+        "settings.verify_mismatch": "Google aún no acepta este URI. Regístralo exacto como se muestra y verifica de nuevo.",
+        "settings.verify_invalid_client": "Google rechazó el cliente OAuth. Revisa GOOGLE_CLIENT_ID en el .env del servidor.",
+        "settings.verify_network": "No se pudo contactar a Google para verificar. Revisa la conexión del servidor e inténtalo de nuevo.",
+        "settings.verify_unknown": "Google dio una respuesta inesperada. Inténtalo de nuevo.",
+        "settings.verify_missing": "Agrega GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET al .env del servidor primero.",
         "settings.muse": "API de Muse",
         "settings.muse_note": "Guarda aquí tu API key de Muse para que la creación de proyectos y la generación de imágenes usen tu propia cuenta.",
         "settings.muse_api_key": "API key de Muse",
@@ -666,6 +1482,14 @@ TRANSLATIONS = {
         "social.text_required": "Escribe el texto o describe qué generar.",
         "social.prompt_required": "Describe de qué debe tratar la publicación.",
         "social.image_url_invalid": "La URL de la imagen debe ser una dirección http(s) completa.",
+        "social.post_type_invalid": "Elige un tipo válido: post, story o reel.",
+        "social.post_type": "Tipo de publicación",
+        "social.all_channels": "Todos mis canales",
+        "social.all_channels_preview": "Todos los canales ({count})",
+        "social.partial_ok": "{ok} de {total} canales publicados.",
+        "social.type_post": "Post",
+        "social.type_story": "Historia",
+        "social.type_reel": "Reel",
         "social.edit_instruction_required": "Describe cómo editar la imagen.",
         "social.upload_label": "O sube tu propia imagen",
         "social.upload_button": "Subir imagen",
@@ -694,6 +1518,8 @@ TRANSLATIONS = {
         "social.localhost_warning": "Nota: Buffer solo puede descargar la imagen cuando esta app tenga una dirección pública. La vista previa funciona igual.",
         "social.save_draft": "Guardar borrador",
         "social.add_queue": "Agregar a la cola",
+        "social.publish_now": "Publicar ahora",
+        "social.published_now_ok": "Publicación enviada.",
         "social.history": "Publicaciones recientes",
         "social.no_posts": "Aún no hay publicaciones. Tus borradores y encolados aparecerán aquí.",
         "social.key_missing": "Agrega tu API key de Buffer para publicar.",
@@ -702,6 +1528,12 @@ TRANSLATIONS = {
         "social.preview_note": "Vista previa. Cada red muestra las publicaciones un poco distinto.",
         "social.published_ok": "Publicación agregada a la cola de Buffer.",
         "social.draft_ok": "Borrador guardado en Buffer.",
+        "social.suggestions": "Ideas desde tu sitio",
+        "social.suggestions_note": "Basadas en tu sitio conectado: marca, páginas y próximos eventos.",
+        "social.suggestions_empty": "Conecta un sitio en Studio para obtener ideas basadas en su contenido.",
+        "social.generate_ideas": "Generar ideas con IA",
+        "social.use_idea": "Usar",
+        "social.from_site": "Desde tu sitio",
         "settings.client_id": "Client ID",
         "settings.client_secret": "Client Secret",
         "settings.redirect_uri": "Redirect URI",
@@ -929,7 +1761,7 @@ TRANSLATIONS = {
         "flash.current_password_invalid": "La contraseña actual es incorrecta.",
         "flash.email_invalid": "Ingresa un email válido.",
         "flash.password_update_mismatch": "Las nuevas contraseñas no coinciden.",
-        "flash.avatar_invalid": "Sube una imagen PNG, JPG, JPEG, GIF o WEBP.",
+        "flash.avatar_invalid": "Sube una imagen PNG, JPG, JPEG, JFIF, GIF o WEBP.",
         "flash.image_invalid": "La imagen es inválida o no está disponible.",
         "flash.asset_required": "Selecciona una imagen para subir.",
         "flash.scan_failed": "No se pudo completar el análisis: {error}",
@@ -945,6 +1777,7 @@ TRANSLATIONS = {
         "flash.select_property": "Selecciona una propiedad de Search Console.",
         "flash.property_selected": "Propiedad seleccionada correctamente.",
         "flash.search_console_disconnected": "Google Search Console fue desconectado.",
+        "flash.search_console_revoke_failed": "Desconectado localmente, pero Google no pudo revocar el token: {error}",
         "flash.logout_success": "Sesión cerrada correctamente.",
         "flash.site_path_required": "Ingresa la ruta del directorio del website.",
         "flash.site_path_missing": "El directorio no existe.",
@@ -962,6 +1795,8 @@ TRANSLATIONS = {
         "flash.site_path_unsafe": "Selecciona una carpeta dedicada al website, no una carpeta del sistema, de inicio o de datos de ONEBoard.",
         "flash.site_connected": "Directorio del website conectado.",
         "flash.site_directory_unmapped": "Conecta primero un directorio del website.",
+        "flash.seo_page_created": "Página SEO «{title}» para la keyword «{keyword}» creada desde Oportunidades SEO. Revísala en Site Manager antes de publicar.",
+        "flash.site_manager_seo_page_created": "Página SEO «{title}» para la keyword «{keyword}» creada en Site Manager. Revísala antes de publicar.",
         "flash.seo_fields_required": "Ingresa un título de página y una keyword objetivo.",
         "flash.remote_required": "Configura primero un destino SSH remoto.",
         "flash.remote_synced": "Website remoto sincronizado al workspace editable.",
@@ -1054,6 +1889,13 @@ def create_app():
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
     app.config["MAX_CONTENT_LENGTH"] = MAX_IMAGE_UPLOAD_BYTES + (1024 * 1024)
     app.config["NATIVE_SERVICE_TOKEN"] = os.environ.get("ONEBOARD_SERVICE_TOKEN", "")
+    # Trust one reverse proxy (cloudflared, nginx, ...) so url_for(_external=True)
+    # and request.url reflect the public https host. Required for the Google
+    # OAuth redirect URI to match the address the browser actually uses.
+    # Without this, behind a tunnel the app would send Google a loopback
+    # redirect_uri and the connection would fail with redirect_uri_mismatch
+    # (or bounce the browser to an unreachable 127.0.0.1 address).
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
     @app.before_request
     def load_request_context():
@@ -1099,6 +1941,7 @@ def create_app():
             "current_lang": lambda: current_language(),
             "language_url": language_url,
             "t": translate,
+            "nav_counts": sidebar_badge_counts,
         }
 
     @app.route("/uploads/avatars/<filename>")
@@ -1115,9 +1958,17 @@ def create_app():
     @login_required
     def uploaded_generated_image(filename):
         safe_name = posixpath.basename(filename or "")
-        if not safe_name.startswith(f"user-{g.user['id']}-"):
+        if not site_image_visible_to_user(safe_name, g.user["id"]):
             abort(404)
         return send_from_directory(generated_image_directory(), safe_name)
+
+    @app.route("/uploads/brand-logos/<filename>")
+    @login_required
+    def uploaded_brand_logo(filename):
+        safe_name = posixpath.basename(filename or "")
+        if not brand_logo_visible_to_user(safe_name, g.user["id"]):
+            abort(404)
+        return send_from_directory(brand_logo_directory(), safe_name)
 
     @app.route("/uploads/social-images/<filename>")
     @login_required
@@ -1495,10 +2346,20 @@ def create_app():
     @login_required
     def api_google_search_console_disconnect():
         connection = get_google_connection(g.user["id"])
+        revoke_warning = None
         if connection:
-            revoke_google_connection(connection)
+            try:
+                revoke_google_connection(connection)
+            except GoogleApiError as error:
+                # Never leave the user stuck on a dead token: drop the local
+                # row even when Google cannot revoke it (already expired,
+                # revoked, or unreachable).
+                revoke_warning = str(error)
         execute_db("DELETE FROM google_search_console_connections WHERE user_id = ?", (g.user["id"],))
-        return jsonify({"ok": True, "gsc": to_jsonable(build_search_console_dashboard(g.user["id"]))})
+        payload = {"ok": True, "gsc": to_jsonable(build_search_console_dashboard(g.user["id"]))}
+        if revoke_warning:
+            payload["revoke_warning"] = revoke_warning
+        return jsonify(payload)
 
     @app.route("/api/site-manager")
     @login_required
@@ -1512,11 +2373,18 @@ def create_app():
         data = request_payload()
         try:
             with site_operation_lock(g.user["id"]):
-                path = (data.get("path") or "").strip()
-                if path:
-                    connect_site_directory(g.user["id"], path)
+                project_id = data.get("project_id")
+                path = data.get("path")
+                if project_id not in (None, "") or (path or "").strip():
+                    connect_site_project(
+                        g.user["id"],
+                        project_id=project_id if project_id not in (None, "") else None,
+                        path=(path or "").strip() or None,
+                    )
                 else:
                     ensure_default_site_directory(g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
         except ValueError as error:
             return api_error(str(error), 400)
         return jsonify({"ok": True, "manager": to_jsonable(build_site_manager(g.user["id"]))})
@@ -1541,6 +2409,8 @@ def create_app():
         try:
             with site_operation_lock(g.user["id"]):
                 remove_site_project(g.user["id"], project_id)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
         except ValueError as error:
             return api_error(str(error), 400)
         return jsonify({"ok": True, "manager": to_jsonable(build_site_manager(g.user["id"]))})
@@ -1550,7 +2420,10 @@ def create_app():
     def api_site_manager_file_raw():
         file_path = request.args.get("path", "").strip()
         try:
+            require_project_permission(g.user["id"], "view")
             absolute_path = resolve_site_file(g.user["id"], file_path)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
         except ValueError:
             return api_error(translate("flash.site_path_missing"), 404)
         if not os.path.isfile(absolute_path):
@@ -1562,8 +2435,11 @@ def create_app():
     def api_site_manager_asset_raw():
         asset_path = request.args.get("path", "").strip()
         try:
+            require_project_permission(g.user["id"], "view")
             validate_asset_path(g.user["id"], asset_path)
             absolute_path = resolve_site_file(g.user["id"], asset_path, allow_oneboard=True)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
         except ValueError:
             return api_error(translate("flash.site_path_missing"), 404)
         return send_file(absolute_path, mimetype=mimetypes.guess_type(absolute_path)[0] or "application/octet-stream")
@@ -1575,6 +2451,7 @@ def create_app():
         try:
             with site_operation_lock(g.user["id"]):
                 validate_expected_site_directory(g.user["id"], data.get("expected_directory_path"))
+                require_project_permission(g.user["id"], "publish")
                 save_remote_connection(
                     g.user["id"],
                     (data.get("host") or "").strip(),
@@ -1585,6 +2462,8 @@ def create_app():
                     (data.get("auth_method") or "").strip(),
                     data.get("password") or "",
                 )
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
         except ValueError as error:
             return api_error(str(error), 400)
         return jsonify({"ok": True, "manager": to_jsonable(build_site_manager(g.user["id"]))})
@@ -1596,6 +2475,7 @@ def create_app():
         try:
             with site_operation_lock(g.user["id"]):
                 validate_expected_site_directory(g.user["id"], data.get("expected_directory_path"))
+                require_project_permission(g.user["id"], "publish")
                 remote = build_remote_connection_candidate(
                     g.user["id"],
                     (data.get("host") or "").strip(),
@@ -1607,6 +2487,8 @@ def create_app():
                     data.get("password") or "",
                 )
                 remote_test = test_remote_connection(remote)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
         except ValueError as error:
             return api_error(str(error), 400)
         return jsonify(
@@ -1633,7 +2515,10 @@ def create_app():
             data = request_payload()
             with site_operation_lock(g.user["id"]):
                 validate_expected_site_directory(g.user["id"], data.get("expected_directory_path"))
+                require_project_permission(g.user["id"], "publish")
                 sync_remote_site_to_workspace(g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
         except ValueError as error:
             return api_error(translate("flash.remote_sync_failed", error=error), 400)
         return jsonify({"ok": True, "manager": to_jsonable(build_site_manager(g.user["id"]))})
@@ -1645,7 +2530,10 @@ def create_app():
             data = request_payload()
             with site_operation_lock(g.user["id"]):
                 validate_expected_site_directory(g.user["id"], data.get("expected_directory_path"))
+                require_project_permission(g.user["id"], "edit")
                 create_site_backup(g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
         except (ValueError, OSError, zipfile.BadZipFile) as error:
             return api_error(translate("flash.backup_failed", error=error), 400)
         return jsonify({"ok": True, "manager": to_jsonable(build_site_manager(g.user["id"]))})
@@ -1657,7 +2545,10 @@ def create_app():
         try:
             with site_operation_lock(g.user["id"]):
                 validate_expected_site_directory(g.user["id"], data.get("expected_directory_path"))
+                require_project_permission(g.user["id"], "edit")
                 restore_site_backup(g.user["id"], str(data.get("backup_id") or "").strip())
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
         except (ValueError, OSError, zipfile.BadZipFile) as error:
             return api_error(translate("flash.restore_failed", error=error), 400)
         return jsonify({"ok": True, "manager": to_jsonable(build_site_manager(g.user["id"]))})
@@ -1673,13 +2564,18 @@ def create_app():
         try:
             with site_operation_lock(g.user["id"]):
                 validate_expected_site_directory(g.user["id"], data.get("expected_directory_path"))
+                require_project_permission(g.user["id"], "edit")
                 if not prompt:
                     raise ValueError(translate("flash.codex_prompt_required"))
                 uploaded_asset = save_codex_suggested_image(g.user["id"], request.files.get("suggested_image"))
                 image_path = selected_asset or uploaded_asset
                 if selected_asset:
                     validate_asset_path(g.user["id"], selected_asset)
-                terminal = run_site_codex_update(g.user["id"], prompt, image_path, provider=provider, model=model)
+                selection = session.get(PREVIEW_SELECTION_KEY)
+                terminal = run_site_codex_update(g.user["id"], prompt, image_path, provider=provider, model=model, selection=selection)
+                session.pop(PREVIEW_SELECTION_KEY, None)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
         except ValueError as error:
             return api_error(str(error), 400)
         return jsonify({"ok": True, "terminal": terminal, "manager": to_jsonable(build_site_manager(g.user["id"]))})
@@ -1695,10 +2591,13 @@ def create_app():
         try:
             with site_operation_lock(g.user["id"]):
                 validate_expected_site_directory(g.user["id"], data.get("expected_directory_path"))
+                require_project_permission(g.user["id"], "edit")
                 terminal = run_site_codex_update(
                     g.user["id"],
                     build_seo_page_codex_prompt(title, keyword),
                 )
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
         except ValueError as error:
             return api_error(str(error), 400)
         notification = translate("flash.seo_page_created", title=title, keyword=keyword)
@@ -1780,7 +2679,13 @@ def create_app():
     @app.route("/api/ai/images", methods=("GET",))
     @login_required
     def api_ai_images():
-        return jsonify({"ok": True, "images": list_generated_images(g.user["id"])})
+        workspace_id = None
+        if (request.args.get("scope") or "").strip().lower() == "site":
+            workspace = get_current_workspace(g.user["id"])
+            if not workspace:
+                return jsonify({"ok": True, "images": []})
+            workspace_id = workspace["id"]
+        return jsonify({"ok": True, "images": list_generated_images(g.user["id"], workspace_id=workspace_id)})
 
     @app.route("/api/ai/images", methods=("POST",))
     @login_required
@@ -1793,9 +2698,11 @@ def create_app():
             return api_error("Unsupported image format.", 400)
         if not prompt:
             return api_error("Enter an image description.", 400)
+        style_suffix = brand_image_style_suffix(current_workspace_brand(g.user["id"]))
+        styled_prompt = f"{prompt} {style_suffix}" if style_suffix else prompt
         try:
             image = run_muse_image_generation(
-                g.user["id"], prompt, model=model, output_format=output_format
+                g.user["id"], styled_prompt, model=model, output_format=output_format
             )
         except ValueError as error:
             save_ai_run(
@@ -1808,6 +2715,7 @@ def create_app():
                 error_text=str(error),
             )
             return api_error(str(error), 400)
+        record_generated_image(g.user["id"], image["filename"], prompt)
         return jsonify(
             {
                 "ok": True,
@@ -1846,13 +2754,44 @@ def create_app():
         prompt = (data.get("prompt") or "").strip()
         provider = (data.get("provider") or "").strip().lower() or None
         model = (data.get("model") or "").strip() or None
+        from_site = False
         if not prompt:
-            return api_error(translate("social.prompt_required"), 400)
+            intelligence = build_site_intelligence(g.user["id"])
+            if not intelligence.get("has_site"):
+                return api_error(translate("social.prompt_required"), 400)
+            business = (intelligence.get("brand") or {}).get("business_name") or intelligence.get(
+                "site_name"
+            )
+            prompt = (
+                f"Write an engaging post about {business or 'this business'} based on the website context."
+            )
+            from_site = True
         try:
             run = run_ai_text_task(g.user["id"], "social_post", prompt, provider=provider, model=model)
         except ValueError as error:
             return api_error(str(error), 400)
-        return jsonify({"ok": True, "text": (run["response_text"] or "").strip()})
+        return jsonify(
+            {"ok": True, "text": (run["response_text"] or "").strip(), "from_site": from_site}
+        )
+
+    @app.route("/api/social/suggestions")
+    @login_required
+    def api_social_suggestions():
+        ensure_default_site_directory(g.user["id"])
+        return jsonify({"ok": True, **to_jsonable(build_social_suggestions(g.user["id"]))})
+
+    @app.route("/api/social/ideas", methods=("POST",))
+    @login_required
+    def api_social_ideas():
+        data = request.get_json(silent=True) or {}
+        hint = (data.get("hint") or data.get("prompt") or "").strip()
+        provider = (data.get("provider") or "").strip().lower() or None
+        model = (data.get("model") or "").strip() or None
+        try:
+            result = generate_social_ideas_with_ai(g.user["id"], hint=hint, provider=provider, model=model)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "ideas": result["ideas"], "provider": result["provider"]})
 
     @app.route("/api/social/images/upload", methods=("POST",))
     @login_required
@@ -1898,6 +2837,7 @@ def create_app():
                 error_text=str(error),
             )
             return api_error(str(error), 400)
+        record_generated_image(g.user["id"], image["filename"], instruction)
         return jsonify(
             {
                 "ok": True,
@@ -1913,17 +2853,28 @@ def create_app():
     @login_required
     def api_social_buffer_create_post():
         data = request.get_json(silent=True) or {}
-        channel_id = (data.get("channel_id") or "").strip()
+        raw_ids = data.get("channel_ids")
+        if isinstance(raw_ids, list):
+            channel_ids = [str(item or "").strip() for item in raw_ids if str(item or "").strip()]
+        else:
+            single_id = (data.get("channel_id") or "").strip()
+            channel_ids = [single_id] if single_id else []
+        # Preserve order, drop duplicates.
+        channel_ids = list(dict.fromkeys(channel_ids))
         text = (data.get("text") or "").strip()
         prompt = (data.get("prompt") or "").strip()
         image_url = (data.get("image_url") or "").strip()
+        post_type = (data.get("post_type") or "post").strip().lower()
         draft = bool(data.get("draft", False))
+        publish_now = bool(data.get("publish_now", False))
+        if post_type not in BUFFER_POST_TYPES:
+            return api_error(translate("social.post_type_invalid"), 400)
         provider = (data.get("provider") or "").strip().lower() or None
         model = (data.get("model") or "").strip() or None
         api_key = get_user_buffer_api_key(g.user["id"])
         if not api_key:
             return api_error(translate("social.buffer_key_required"), 400)
-        if not channel_id:
+        if not channel_ids:
             return api_error(translate("social.channel_required"), 400)
         if image_url:
             parsed_url = urllib.parse.urlparse(image_url)
@@ -1943,18 +2894,64 @@ def create_app():
             channels = list_buffer_channels(api_key)
         except ValueError as error:
             return api_error(str(error), 400)
-        channel = next((item for item in channels if item["id"] == channel_id), None)
-        if channel is None:
-            return api_error(translate("social.channel_required"), 400)
-        try:
-            post = create_buffer_post(api_key, channel_id, text, draft=draft, image_url=image_url or None)
-        except ValueError as error:
-            return api_error(str(error), 400)
-        status = "draft" if draft else "queued"
-        record_social_post(g.user["id"], channel_id, channel["name"], text, status, post["id"], image_url or None)
-        return jsonify(
-            {"ok": True, "post": post, "status": status, "posts": to_jsonable(list_social_posts(g.user["id"]))}
-        )
+        targets = []
+        for channel_id in channel_ids:
+            channel = next((item for item in channels if item["id"] == channel_id), None)
+            if channel is None:
+                return api_error(translate("social.channel_required"), 400)
+            targets.append(channel)
+        if draft:
+            status = "draft"
+        elif publish_now:
+            status = "published"
+        else:
+            status = "queued"
+        results = []
+        for channel in targets:
+            try:
+                post = create_buffer_post(
+                    api_key, channel["id"], text, draft=draft, image_url=image_url or None,
+                    publish_now=publish_now, post_type=post_type,
+                    channel_service=channel.get("service") or "",
+                )
+            except ValueError as error:
+                results.append(
+                    {
+                        "channel_id": channel["id"],
+                        "channel_name": channel["name"],
+                        "ok": False,
+                        "error": str(error),
+                    }
+                )
+                continue
+            record_social_post(
+                g.user["id"], channel["id"], channel["name"], text, status, post["id"],
+                image_url or None, post_type,
+            )
+            results.append(
+                {
+                    "channel_id": channel["id"],
+                    "channel_name": channel["name"],
+                    "ok": True,
+                    "post": post,
+                    "status": status,
+                }
+            )
+        succeeded = sum(1 for item in results if item["ok"])
+        if not succeeded:
+            first_error = results[0]["error"] if results else translate("social.channel_required")
+            return api_error(first_error, 400)
+        body = {
+            "ok": True,
+            "results": results,
+            "published": succeeded,
+            "failed": len(results) - succeeded,
+            "posts": to_jsonable(list_social_posts(g.user["id"])),
+        }
+        if len(results) == 1:
+            body["post"] = results[0].get("post")
+            body["status"] = status
+        return jsonify(body)
 
     @app.route("/api/site-manager/assets/upload", methods=("POST",))
     @login_required
@@ -1962,10 +2959,13 @@ def create_app():
         try:
             with site_operation_lock(g.user["id"]):
                 validate_expected_site_directory(g.user["id"], request.form.get("expected_directory_path"))
+                require_project_permission(g.user["id"], "edit")
                 upload = request.files.get("asset")
                 if not upload or not upload.filename:
                     raise ValueError(translate("flash.asset_required"))
                 asset_path = save_codex_suggested_image(g.user["id"], upload)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
         except ValueError as error:
             return api_error(str(error), 400)
         return jsonify({"ok": True, "asset_path": asset_path, "manager": to_jsonable(build_site_manager(g.user["id"]))})
@@ -1984,11 +2984,15 @@ def create_app():
             (data.get("tone") or "").strip(),
             (data.get("audience") or "").strip(),
             (data.get("cta") or "").strip(),
+            brand_context=current_workspace_brand_text(g.user["id"]),
         )
         try:
             with site_operation_lock(g.user["id"]):
                 validate_expected_site_directory(g.user["id"], data.get("expected_directory_path"))
+                require_project_permission(g.user["id"], "edit")
                 terminal = run_site_codex_update(g.user["id"], prompt)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
         except (ValueError, OSError, zipfile.BadZipFile, KeyError, TypeError) as error:
             return api_error(str(error), 400)
         return jsonify(
@@ -2014,13 +3018,22 @@ def create_app():
             with site_operation_lock(g.user["id"]):
                 validate_expected_site_directory(g.user["id"], data.get("expected_directory_path"))
                 if action == "approve":
+                    require_project_permission(g.user["id"], "publish")
                     set_update_status(g.user["id"], update_id, "approved")
                 elif action == "publish":
-                    publish_site_to_remote(g.user["id"], update_id)
+                    require_project_permission(g.user["id"], "publish")
+                    try:
+                        publish_site_to_remote(g.user["id"], update_id)
+                    except Exception as error:
+                        record_publish_alert(g.user["id"], error)
+                        raise
                 elif action == "restore":
+                    require_project_permission(g.user["id"], "edit")
                     restore_update_files(g.user["id"], update_id)
                 else:
                     raise ValueError("Unknown action.")
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
         except (ValueError, OSError, zipfile.BadZipFile, KeyError, TypeError) as error:
             return api_error(str(error), 400)
         return jsonify({"ok": True, "manager": to_jsonable(build_site_manager(g.user["id"]))})
@@ -2033,7 +3046,10 @@ def create_app():
         try:
             with site_operation_lock(g.user["id"]):
                 validate_expected_site_directory(g.user["id"], data.get("expected_directory_path"))
+                require_project_permission(g.user["id"], "edit")
                 delete_site_file(g.user["id"], file_path)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
         except ValueError as error:
             return api_error(translate("site.file_delete_failed", error=error), 400)
         return jsonify({"ok": True, "manager": to_jsonable(build_site_manager(g.user["id"]))})
@@ -2045,10 +3061,1872 @@ def create_app():
         try:
             with site_operation_lock(g.user["id"]):
                 validate_expected_site_directory(g.user["id"], data.get("expected_directory_path"))
+                require_project_permission(g.user["id"], "edit")
                 terminal = run_site_terminal_command(g.user["id"], (data.get("command") or "").strip())
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
         except ValueError as error:
             return api_error(str(error), 400)
         return jsonify({"ok": True, "terminal": terminal})
+
+    @app.route("/site-manager/preview")
+    @login_required
+    def site_manager_preview_index():
+        return redirect(url_for("site_manager_preview_file", filepath="index.html"))
+
+    @app.route("/site-manager/preview/<path:filepath>")
+    @login_required
+    def site_manager_preview_file(filepath):
+        try:
+            require_project_permission(g.user["id"], "view")
+            return serve_workspace_preview_file(
+                g.user["id"], filepath, picker="picker" in request.args
+            )
+        except TeamAccessDenied:
+            abort(403)
+        except ValueError:
+            abort(404)
+
+    @app.route("/api/site-manager/preview/select", methods=("POST",))
+    @login_required
+    def api_preview_select():
+        data = request_payload()
+        try:
+            require_project_permission(g.user["id"], "view")
+            selection = clean_preview_selection(g.user["id"], data)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        session[PREVIEW_SELECTION_KEY] = selection
+        return jsonify({"ok": True, "selection": selection})
+
+    @app.route("/api/site-manager/preview/select", methods=("DELETE",))
+    @login_required
+    def api_preview_select_clear():
+        session.pop(PREVIEW_SELECTION_KEY, None)
+        return jsonify({"ok": True, "selection": None})
+
+    @app.route("/api/site-manager/updates/<int:update_id>/compare")
+    @login_required
+    def api_update_compare(update_id):
+        try:
+            compare = build_update_compare(g.user["id"], update_id)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 404)
+        return jsonify({"ok": True, **to_jsonable(compare)})
+
+    @app.route("/site-manager/updates/<int:update_id>/before/<path:filepath>")
+    @login_required
+    def site_manager_update_before_file(update_id, filepath):
+        try:
+            require_project_permission(g.user["id"], "view")
+            update = require_update_for_current_directory(g.user["id"], update_id)
+            content = read_snapshot_member(update.get("snapshot_path"), filepath)
+        except TeamAccessDenied:
+            abort(403)
+        except ValueError:
+            abort(404)
+        if content is None:
+            abort(404)
+        mime_type = mimetypes.guess_type(filepath)[0] or "application/octet-stream"
+        return Response(content, mimetype=mime_type)
+
+    @app.route("/site-manager/updates/<int:update_id>/compare")
+    @login_required
+    def site_manager_update_compare(update_id):
+        try:
+            compare = build_update_compare(g.user["id"], update_id)
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+            return redirect(url_for("site_manager"))
+        return render_template(
+            "update_compare.html",
+            compare=compare,
+            team_context=current_team_context(g.user["id"]),
+        )
+
+    @app.route("/api/site-manager/health")
+    @login_required
+    def api_site_health():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            health = get_site_health(g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "health": to_jsonable(health)})
+
+    @app.route("/api/site-manager/health/scan", methods=("POST",))
+    @login_required
+    def api_site_health_scan():
+        ensure_default_site_directory(g.user["id"])
+        data = request_payload()
+        skip_external = str(data.get("skip_external") or "").strip().lower() in (
+            "1", "true", "yes", "on",
+        )
+        try:
+            with site_operation_lock(g.user["id"]):
+                health = run_site_health_scan(g.user["id"], skip_external=skip_external)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "health": to_jsonable(health)})
+
+    @app.route("/api/site-manager/health/findings/<int:finding_id>/apply", methods=("POST",))
+    @login_required
+    def api_site_finding_apply(finding_id):
+        data = request_payload()
+        try:
+            with site_operation_lock(g.user["id"]):
+                health = apply_site_finding(g.user["id"], finding_id, data)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify(
+            {"ok": True, "health": to_jsonable(health), "manager": to_jsonable(build_site_manager(g.user["id"]))}
+        )
+
+    @app.route("/api/site-manager/health/findings/<int:finding_id>/ignore", methods=("POST",))
+    @login_required
+    def api_site_finding_ignore(finding_id):
+        try:
+            health = ignore_site_finding(g.user["id"], finding_id, ignored=True)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "health": to_jsonable(health)})
+
+    @app.route("/api/site-manager/health/findings/<int:finding_id>/reopen", methods=("POST",))
+    @login_required
+    def api_site_finding_reopen(finding_id):
+        try:
+            health = ignore_site_finding(g.user["id"], finding_id, ignored=False)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "health": to_jsonable(health)})
+
+    @app.route("/api/site-manager/health/fix-all", methods=("POST",))
+    @login_required
+    def api_site_health_fix_all():
+        try:
+            with site_operation_lock(g.user["id"]):
+                result = apply_all_site_findings(g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify(
+            {
+                "ok": True,
+                "health": to_jsonable(result["health"]),
+                "fixed": result["fixed"],
+                "skipped": result["skipped"],
+                "skipped_checks": result["skipped_checks"],
+                "manager": to_jsonable(build_site_manager(g.user["id"])),
+            }
+        )
+
+    @app.route("/api/site-manager/health/ai-fix", methods=("POST",))
+    @login_required
+    def api_site_health_ai_fix():
+        data = request_payload()
+        finding_ids = data.get("finding_ids")
+        provider = (data.get("provider") or "").strip().lower() or None
+        model = (data.get("model") or "").strip() or None
+        try:
+            with site_operation_lock(g.user["id"]):
+                result = run_ai_health_fix(
+                    g.user["id"], finding_ids=finding_ids, provider=provider, model=model
+                )
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify(
+            {
+                "ok": True,
+                "health": to_jsonable(result["health"]),
+                "fixed": result["fixed"],
+                "pages": result["pages"],
+                "provider": result["provider"],
+                "manager": to_jsonable(build_site_manager(g.user["id"])),
+            }
+        )
+
+    @app.route("/api/site-manager/health/summary", methods=("POST",))
+    @login_required
+    def api_site_health_summary():
+        data = request_payload()
+        provider = (data.get("provider") or "").strip().lower() or None
+        model = (data.get("model") or "").strip() or None
+        try:
+            result = summarize_health_with_ai(g.user["id"], provider=provider, model=model)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "summary": result["summary"], "provider": result["provider"]})
+
+    @app.route("/api/site-manager/intelligence")
+    @login_required
+    def api_site_intelligence():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            intelligence = build_site_intelligence(g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "intelligence": to_jsonable(intelligence)})
+
+    @app.route("/site-manager/health", methods=("GET", "POST"))
+    @login_required
+    def site_health():
+        ensure_default_site_directory(g.user["id"])
+        if request.method == "POST":
+            skip_external = request.form.get("skip_external") == "1"
+            try:
+                with site_operation_lock(g.user["id"]):
+                    run_site_health_scan(g.user["id"], skip_external=skip_external)
+            except (TeamAccessDenied, ValueError) as error:
+                flash(str(error), "warning")
+            else:
+                flash(translate("flash.scan_done"), "success")
+            return redirect(url_for("site_health"))
+        try:
+            health = get_site_health(g.user["id"])
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+            return redirect(url_for("site_manager"))
+        return render_template(
+            "site_health.html", health=health, team_context=current_team_context(g.user["id"])
+        )
+
+    @app.route("/site-manager/health/findings/<int:finding_id>/apply", methods=("POST",))
+    @login_required
+    def site_finding_apply(finding_id):
+        try:
+            with site_operation_lock(g.user["id"]):
+                apply_site_finding(g.user["id"], finding_id, request.form)
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.finding_resolved"), "success")
+        return redirect(url_for("site_health"))
+
+    @app.route("/site-manager/health/findings/<int:finding_id>/ignore", methods=("POST",))
+    @login_required
+    def site_finding_ignore(finding_id):
+        try:
+            ignore_site_finding(g.user["id"], finding_id, ignored=True)
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.finding_ignored"), "success")
+        return redirect(url_for("site_health"))
+
+    @app.route("/site-manager/health/findings/<int:finding_id>/reopen", methods=("POST",))
+    @login_required
+    def site_finding_reopen(finding_id):
+        try:
+            ignore_site_finding(g.user["id"], finding_id, ignored=False)
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.finding_reopened"), "success")
+        return redirect(url_for("site_health"))
+
+    @app.route("/site-manager/health/fix-all", methods=("POST",))
+    @login_required
+    def site_health_fix_all():
+        try:
+            with site_operation_lock(g.user["id"]):
+                result = apply_all_site_findings(g.user["id"])
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(
+                translate("flash.fixes_applied", fixed=result["fixed"], skipped=result["skipped"]),
+                "success",
+            )
+        return redirect(url_for("site_health"))
+
+    @app.route("/site-manager/health/ai-fix", methods=("POST",))
+    @login_required
+    def site_health_ai_fix():
+        try:
+            with site_operation_lock(g.user["id"]):
+                result = run_ai_health_fix(g.user["id"])
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.ai_fixes_applied", fixed=result["fixed"]), "success")
+        return redirect(url_for("site_health"))
+
+    @app.route("/api/site-manager/requests")
+    @login_required
+    def api_workspace_requests():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            links = list_request_links(g.user["id"])
+            requests = list_workspace_requests(g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "links": to_jsonable(links), "requests": to_jsonable(requests)})
+
+    @app.route("/api/site-manager/request-links", methods=("POST",))
+    @login_required
+    def api_request_link_create():
+        ensure_default_site_directory(g.user["id"])
+        data = request_payload()
+        try:
+            link, token = create_request_link(
+                g.user["id"], data.get("label", ""), data.get("expires_days")
+            )
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        link["url"] = url_for("portal_index", token=token, _external=True)
+        return jsonify({"ok": True, "link": to_jsonable(link)})
+
+    @app.route("/api/site-manager/request-links/<int:link_id>", methods=("DELETE",))
+    @login_required
+    def api_request_link_revoke(link_id):
+        try:
+            revoke_request_link(g.user["id"], link_id)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True})
+
+    @app.route("/api/site-manager/requests/<int:request_id>")
+    @login_required
+    def api_request_thread(request_id):
+        try:
+            thread = get_agency_request_thread(g.user["id"], request_id)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 404)
+        return jsonify({"ok": True, **to_jsonable(thread)})
+
+    @app.route("/api/site-manager/requests/<int:request_id>/comments", methods=("POST",))
+    @login_required
+    def api_request_comment_create(request_id):
+        data = request_payload()
+        files = request.files if request.files else None
+        try:
+            thread = agency_add_comment(g.user["id"], request_id, data.get("body", ""), files=files)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, **to_jsonable(thread)})
+
+    @app.route("/api/site-manager/requests/<int:request_id>/status", methods=("POST",))
+    @login_required
+    def api_request_status_update(request_id):
+        data = request_payload()
+        try:
+            thread = agency_set_request_status(
+                g.user["id"], request_id, data.get("status"), proposal=data.get("proposal")
+            )
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "request": to_jsonable(thread)})
+
+    @app.route("/api/site-manager/requests/<int:request_id>", methods=("DELETE",))
+    @login_required
+    def api_request_delete(request_id):
+        try:
+            agency_delete_request(g.user["id"], request_id)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True})
+
+    @app.route("/site-manager/requests/attachments/<filename>")
+    @login_required
+    def agency_request_attachment(filename):
+        try:
+            attachment = get_agency_attachment(g.user["id"], filename)
+        except (TeamAccessDenied, ValueError):
+            abort(404)
+        if not attachment:
+            abort(404)
+        return send_from_directory(
+            request_attachment_directory(),
+            posixpath.basename(attachment["filename"]),
+            mimetype=attachment["mime"] or "application/octet-stream",
+        )
+
+    @app.route("/site-manager/requests")
+    @login_required
+    def agency_requests():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            links = list_request_links(g.user["id"])
+            requests = list_workspace_requests(g.user["id"])
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+            return redirect(url_for("site_manager"))
+        return render_template(
+            "requests/list.html",
+            links=links,
+            requests=requests,
+            team_context=current_team_context(g.user["id"]),
+        )
+
+    @app.route("/site-manager/request-links", methods=("POST",))
+    @login_required
+    def agency_request_link_create():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            link, token = create_request_link(
+                g.user["id"], request.form.get("label", ""), request.form.get("expires_days") or None
+            )
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+            return redirect(url_for("agency_requests"))
+        flash(f"{translate('flash.link_created')} {url_for('portal_index', token=token, _external=True)}", "success")
+        return redirect(url_for("agency_requests"))
+
+    @app.route("/site-manager/request-links/<int:link_id>/revoke", methods=("POST",))
+    @login_required
+    def agency_request_link_revoke(link_id):
+        try:
+            revoke_request_link(g.user["id"], link_id)
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.link_revoked"), "success")
+        return redirect(url_for("agency_requests"))
+
+    @app.route("/site-manager/requests/<int:request_id>")
+    @login_required
+    def agency_request_detail(request_id):
+        try:
+            thread = get_agency_request_thread(g.user["id"], request_id)
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+            return redirect(url_for("agency_requests"))
+        return render_template(
+            "requests/detail.html",
+            thread=thread,
+            team_context=current_team_context(g.user["id"]),
+        )
+
+    @app.route("/site-manager/requests/<int:request_id>/comments", methods=("POST",))
+    @login_required
+    def agency_request_comment(request_id):
+        try:
+            agency_add_comment(
+                g.user["id"], request_id, request.form.get("body", ""),
+                files=request.files if request.files else None,
+            )
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.comment_added"), "success")
+        return redirect(url_for("agency_request_detail", request_id=request_id))
+
+    @app.route("/site-manager/requests/<int:request_id>/status", methods=("POST",))
+    @login_required
+    def agency_request_status(request_id):
+        try:
+            agency_set_request_status(
+                g.user["id"], request_id, request.form.get("status"),
+                proposal=request.form.get("proposal"),
+            )
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.request_updated"), "success")
+        return redirect(url_for("agency_request_detail", request_id=request_id))
+
+    @app.route("/site-manager/requests/<int:request_id>/delete", methods=("POST",))
+    @login_required
+    def agency_request_delete(request_id):
+        try:
+            agency_delete_request(g.user["id"], request_id)
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+            return redirect(url_for("agency_request_detail", request_id=request_id))
+        flash(translate("flash.request_deleted"), "success")
+        return redirect(url_for("agency_requests"))
+
+    @app.route("/api/site-manager/calendar")
+    @login_required
+    def api_calendar_list():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            events = list_calendar_events(g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "events": to_jsonable(events)})
+
+    @app.route("/api/site-manager/calendar", methods=("POST",))
+    @login_required
+    def api_calendar_create():
+        ensure_default_site_directory(g.user["id"])
+        data = request_payload()
+        try:
+            with site_operation_lock(g.user["id"]):
+                event = create_calendar_event(
+                    g.user["id"],
+                    kind=data.get("kind", "note"),
+                    title=data.get("title", ""),
+                    brief=data.get("brief", ""),
+                    page=data.get("page", ""),
+                    starts_on=data.get("starts_on", ""),
+                    ends_on=data.get("ends_on", ""),
+                )
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "event": to_jsonable(event)})
+
+    @app.route("/api/site-manager/calendar/<int:event_id>", methods=("POST",))
+    @login_required
+    def api_calendar_update(event_id):
+        data = request_payload()
+        try:
+            with site_operation_lock(g.user["id"]):
+                event = update_calendar_event(
+                    g.user["id"],
+                    event_id,
+                    kind=data.get("kind"),
+                    title=data.get("title"),
+                    brief=data.get("brief"),
+                    page=data.get("page"),
+                    starts_on=data.get("starts_on"),
+                    ends_on=data.get("ends_on"),
+                )
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "event": to_jsonable(event)})
+
+    @app.route("/api/site-manager/calendar/<int:event_id>/cancel", methods=("POST",))
+    @login_required
+    def api_calendar_cancel(event_id):
+        try:
+            event = cancel_calendar_event(g.user["id"], event_id)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "event": to_jsonable(event)})
+
+    @app.route("/api/site-manager/calendar/<int:event_id>", methods=("DELETE",))
+    @login_required
+    def api_calendar_delete(event_id):
+        try:
+            delete_calendar_event(g.user["id"], event_id)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True})
+
+    @app.route("/api/site-manager/calendar/<int:event_id>/execute", methods=("POST",))
+    @login_required
+    def api_calendar_execute(event_id):
+        try:
+            with site_operation_lock(g.user["id"]):
+                event, terminal = execute_calendar_event(g.user["id"], event_id)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "event": to_jsonable(event), "terminal": terminal})
+
+    @app.route("/site-manager/calendar")
+    @login_required
+    def agency_calendar():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            events = list_calendar_events(g.user["id"])
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+            return redirect(url_for("site_manager"))
+        return render_template(
+            "site_calendar.html",
+            events=events,
+            today=date.today().isoformat(),
+            team_context=current_team_context(g.user["id"]),
+        )
+
+    @app.route("/site-manager/calendar", methods=("POST",))
+    @login_required
+    def agency_calendar_create():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            with site_operation_lock(g.user["id"]):
+                create_calendar_event(
+                    g.user["id"],
+                    kind=request.form.get("kind", "note"),
+                    title=request.form.get("title", ""),
+                    brief=request.form.get("brief", ""),
+                    page=request.form.get("page", ""),
+                    starts_on=request.form.get("starts_on", ""),
+                    ends_on=request.form.get("ends_on", ""),
+                )
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.event_created"), "success")
+        return redirect(url_for("agency_calendar"))
+
+    @app.route("/site-manager/calendar/<int:event_id>/update", methods=("POST",))
+    @login_required
+    def agency_calendar_update(event_id):
+        try:
+            with site_operation_lock(g.user["id"]):
+                update_calendar_event(
+                    g.user["id"],
+                    event_id,
+                    kind=request.form.get("kind"),
+                    title=request.form.get("title"),
+                    brief=request.form.get("brief"),
+                    page=request.form.get("page"),
+                    starts_on=request.form.get("starts_on"),
+                    ends_on=request.form.get("ends_on"),
+                )
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.event_updated"), "success")
+        return redirect(url_for("agency_calendar"))
+
+    @app.route("/site-manager/calendar/<int:event_id>/cancel", methods=("POST",))
+    @login_required
+    def agency_calendar_cancel(event_id):
+        try:
+            cancel_calendar_event(g.user["id"], event_id)
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.event_cancelled"), "success")
+        return redirect(url_for("agency_calendar"))
+
+    @app.route("/site-manager/calendar/<int:event_id>/delete", methods=("POST",))
+    @login_required
+    def agency_calendar_delete(event_id):
+        try:
+            delete_calendar_event(g.user["id"], event_id)
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.event_deleted"), "success")
+        return redirect(url_for("agency_calendar"))
+
+    @app.route("/site-manager/calendar/<int:event_id>/execute", methods=("POST",))
+    @login_required
+    def agency_calendar_execute(event_id):
+        try:
+            with site_operation_lock(g.user["id"]):
+                execute_calendar_event(g.user["id"], event_id)
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.event_executed"), "success")
+        return redirect(url_for("agency_calendar"))
+
+    @app.route("/api/site-manager/inbox")
+    @login_required
+    def api_inbox_list():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            messages = list_contact_messages(g.user["id"], request.args.get("status"))
+            tokens = list_form_tokens(g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "messages": to_jsonable(messages), "tokens": to_jsonable(tokens)})
+
+    @app.route("/api/site-manager/inbox/token", methods=("POST",))
+    @login_required
+    def api_form_token_create():
+        ensure_default_site_directory(g.user["id"])
+        data = request_payload()
+        try:
+            _token_row, token = create_form_token(g.user["id"], data.get("label", ""))
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        submit_url = url_for("public_form_submit", token=token, _external=True)
+        return jsonify({"ok": True, "token": token, "submit_url": submit_url})
+
+    @app.route("/api/site-manager/inbox/token/<int:token_id>", methods=("DELETE",))
+    @login_required
+    def api_form_token_revoke(token_id):
+        try:
+            revoke_form_token(g.user["id"], token_id)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True})
+
+    @app.route("/api/site-manager/inbox/snippet")
+    @login_required
+    def api_inbox_snippet():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            token_row = latest_form_token(g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        if not token_row:
+            return api_error(translate("flash.message_not_found"), 404)
+        submit_url = url_for("public_form_submit", token=token_row["token"], _external=True)
+        return jsonify({"ok": True, "snippet": build_form_snippet(submit_url)})
+
+    @app.route("/api/site-manager/inbox/<int:message_id>/attend", methods=("POST",))
+    @login_required
+    def api_inbox_attend(message_id):
+        try:
+            message = set_contact_message_status(g.user["id"], message_id, "attended")
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "message": to_jsonable(message)})
+
+    @app.route("/api/site-manager/inbox/<int:message_id>/reopen", methods=("POST",))
+    @login_required
+    def api_inbox_reopen(message_id):
+        try:
+            message = set_contact_message_status(g.user["id"], message_id, "new")
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "message": to_jsonable(message)})
+
+    @app.route("/api/site-manager/inbox/<int:message_id>", methods=("DELETE",))
+    @login_required
+    def api_inbox_delete(message_id):
+        try:
+            delete_contact_message(g.user["id"], message_id)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True})
+
+    @app.route("/site-manager/inbox")
+    @login_required
+    def agency_inbox():
+        ensure_default_site_directory(g.user["id"])
+        status = request.args.get("status", "")
+        try:
+            messages = list_contact_messages(g.user["id"], status or None)
+            tokens = list_form_tokens(g.user["id"])
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+            return redirect(url_for("site_manager"))
+        return render_template(
+            "site_inbox.html",
+            messages=messages,
+            tokens=tokens,
+            status=status,
+            team_context=current_team_context(g.user["id"]),
+        )
+
+    @app.route("/site-manager/form-tokens", methods=("POST",))
+    @login_required
+    def agency_form_token_create():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            _token_row, token = create_form_token(g.user["id"], request.form.get("label", ""))
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(f"{translate('flash.token_created')} {url_for('public_form_submit', token=token, _external=True)}", "success")
+        return redirect(url_for("agency_inbox"))
+
+    @app.route("/site-manager/form-tokens/<int:token_id>/revoke", methods=("POST",))
+    @login_required
+    def agency_form_token_revoke(token_id):
+        try:
+            revoke_form_token(g.user["id"], token_id)
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.token_revoked"), "success")
+        return redirect(url_for("agency_inbox"))
+
+    @app.route("/site-manager/inbox/<int:message_id>/attend", methods=("POST",))
+    @login_required
+    def agency_inbox_attend(message_id):
+        try:
+            set_contact_message_status(g.user["id"], message_id, "attended")
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.message_attended"), "success")
+        return redirect(url_for("agency_inbox"))
+
+    @app.route("/site-manager/inbox/<int:message_id>/reopen", methods=("POST",))
+    @login_required
+    def agency_inbox_reopen(message_id):
+        try:
+            set_contact_message_status(g.user["id"], message_id, "new")
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.message_reopened"), "success")
+        return redirect(url_for("agency_inbox"))
+
+    @app.route("/site-manager/inbox/<int:message_id>/delete", methods=("POST",))
+    @login_required
+    def agency_inbox_delete(message_id):
+        try:
+            delete_contact_message(g.user["id"], message_id)
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.message_deleted"), "success")
+        return redirect(url_for("agency_inbox"))
+
+    @app.route("/forms/<token>/submit", methods=("POST", "OPTIONS"))
+    def public_form_submit(token):
+        if request.method == "OPTIONS":
+            response = jsonify({"ok": True})
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+            return response
+        if request.is_json:
+            fields = request.get_json(silent=True) or {}
+        else:
+            fields = request.form.to_dict()
+        try:
+            message = submit_contact_message(token, request.remote_addr, fields)
+        except FormRateLimited as error:
+            response = jsonify({"ok": False, "error": str(error)})
+            response.status_code = 429
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return response
+        except ValueError as error:
+            response = jsonify({"ok": False, "error": str(error)})
+            response.status_code = 400
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return response
+        if message is None:
+            response = jsonify({"ok": False, "error": translate("flash.message_not_found")})
+            response.status_code = 404
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return response
+        response = jsonify({"ok": True})
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        return response
+
+    @app.route("/api/site-manager/alerts")
+    @login_required
+    def api_alerts_list():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            rules = list_alert_rules(g.user["id"])
+            alerts = list_site_alerts(g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "rules": to_jsonable(rules), "alerts": to_jsonable(alerts)})
+
+    @app.route("/api/site-manager/alerts/rules", methods=("POST",))
+    @login_required
+    def api_alert_rule_create():
+        ensure_default_site_directory(g.user["id"])
+        data = request_payload()
+        try:
+            rule = create_alert_rule(
+                g.user["id"],
+                kind=data.get("kind", "uptime"),
+                target=data.get("target", ""),
+                name=data.get("name", ""),
+                threshold_days=data.get("threshold_days", 14),
+            )
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "rule": to_jsonable(rule)})
+
+    @app.route("/api/site-manager/alerts/rules/<int:rule_id>", methods=("POST",))
+    @login_required
+    def api_alert_rule_update(rule_id):
+        data = request_payload()
+        try:
+            rule = update_alert_rule(
+                g.user["id"],
+                rule_id,
+                name=data.get("name"),
+                enabled=data.get("enabled"),
+                threshold_days=data.get("threshold_days"),
+            )
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "rule": to_jsonable(rule)})
+
+    @app.route("/api/site-manager/alerts/rules/<int:rule_id>", methods=("DELETE",))
+    @login_required
+    def api_alert_rule_delete(rule_id):
+        try:
+            delete_alert_rule(g.user["id"], rule_id)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True})
+
+    @app.route("/api/site-manager/alerts/check", methods=("POST",))
+    @login_required
+    def api_alerts_check():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            result = run_site_alert_checks(g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, **to_jsonable(result)})
+
+    @app.route("/api/site-manager/alerts/<int:alert_id>/ack", methods=("POST",))
+    @login_required
+    def api_alert_ack(alert_id):
+        try:
+            result = set_site_alert_status(g.user["id"], alert_id, "acked")
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, **to_jsonable(result)})
+
+    @app.route("/api/site-manager/alerts/<int:alert_id>/resolve", methods=("POST",))
+    @login_required
+    def api_alert_resolve(alert_id):
+        try:
+            result = set_site_alert_status(g.user["id"], alert_id, "resolved")
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, **to_jsonable(result)})
+
+    @app.route("/api/site-manager/alerts/<int:alert_id>/reopen", methods=("POST",))
+    @login_required
+    def api_alert_reopen(alert_id):
+        try:
+            result = set_site_alert_status(g.user["id"], alert_id, "open")
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, **to_jsonable(result)})
+
+    @app.route("/site-manager/alerts")
+    @login_required
+    def agency_alerts():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            rules = list_alert_rules(g.user["id"])
+            alerts = list_site_alerts(g.user["id"])
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+            return redirect(url_for("site_manager"))
+        return render_template(
+            "site_alerts.html",
+            rules=rules,
+            alerts=alerts,
+            team_context=current_team_context(g.user["id"]),
+        )
+
+    @app.route("/site-manager/alert-rules", methods=("POST",))
+    @login_required
+    def agency_alert_rule_create():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            create_alert_rule(
+                g.user["id"],
+                kind=request.form.get("kind", "uptime"),
+                target=request.form.get("target", ""),
+                name=request.form.get("name", ""),
+                threshold_days=request.form.get("threshold_days", 14),
+            )
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.rule_created"), "success")
+        return redirect(url_for("agency_alerts"))
+
+    @app.route("/site-manager/alert-rules/<int:rule_id>/update", methods=("POST",))
+    @login_required
+    def agency_alert_rule_update(rule_id):
+        try:
+            update_alert_rule(
+                g.user["id"],
+                rule_id,
+                name=request.form.get("name"),
+                enabled=request.form.get("enabled"),
+                threshold_days=request.form.get("threshold_days"),
+            )
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.rule_updated"), "success")
+        return redirect(url_for("agency_alerts"))
+
+    @app.route("/site-manager/alert-rules/<int:rule_id>/delete", methods=("POST",))
+    @login_required
+    def agency_alert_rule_delete(rule_id):
+        try:
+            delete_alert_rule(g.user["id"], rule_id)
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.rule_deleted"), "success")
+        return redirect(url_for("agency_alerts"))
+
+    @app.route("/site-manager/alerts/check", methods=("POST",))
+    @login_required
+    def agency_alerts_check():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            run_site_alert_checks(g.user["id"])
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.check_done"), "success")
+        return redirect(url_for("agency_alerts"))
+
+    @app.route("/site-manager/alerts/<int:alert_id>/status", methods=("POST",))
+    @login_required
+    def agency_alert_status(alert_id):
+        try:
+            set_site_alert_status(g.user["id"], alert_id, request.form.get("status"))
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.alert_updated"), "success")
+        return redirect(url_for("agency_alerts"))
+
+    @app.route("/api/site-manager/reports")
+    @login_required
+    def api_reports_list():
+        ensure_default_site_directory(g.user["id"])
+        period = request.args.get("period") or date.today().isoformat()[:7]
+        try:
+            workspace = require_current_request_workspace(g.user["id"])
+            report = build_site_report(g.user["id"], workspace, period)
+            links = list_site_report_links(g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "report": to_jsonable(report), "links": to_jsonable(links)})
+
+    @app.route("/api/site-manager/reports", methods=("POST",))
+    @login_required
+    def api_report_link_create():
+        ensure_default_site_directory(g.user["id"])
+        data = request_payload()
+        try:
+            link, token = create_site_report_link(
+                g.user["id"], data.get("period") or date.today().isoformat()[:7], data.get("title", "")
+            )
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        link["url"] = url_for("public_site_report", token=token, _external=True)
+        return jsonify({"ok": True, "link": to_jsonable(link)})
+
+    @app.route("/api/site-manager/reports/<int:link_id>")
+    @login_required
+    def api_report_detail(link_id):
+        ensure_default_site_directory(g.user["id"])
+        try:
+            report = get_site_report(g.user["id"], link_id)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 404)
+        return jsonify({"ok": True, "report": to_jsonable(report)})
+
+    @app.route("/api/site-manager/reports/<int:link_id>", methods=("DELETE",))
+    @login_required
+    def api_report_link_revoke(link_id):
+        try:
+            revoke_site_report_link(g.user["id"], link_id)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True})
+
+    @app.route("/site-manager/reports")
+    @login_required
+    def agency_reports():
+        ensure_default_site_directory(g.user["id"])
+        period = request.args.get("period") or date.today().isoformat()[:7]
+        try:
+            workspace = require_current_request_workspace(g.user["id"])
+            report = build_site_report(g.user["id"], workspace, period)
+            links = list_site_report_links(g.user["id"])
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+            return redirect(url_for("site_manager"))
+        return render_template(
+            "site_reports.html",
+            report=report,
+            links=links,
+            team_context=current_team_context(g.user["id"]),
+        )
+
+    @app.route("/site-manager/reports", methods=("POST",))
+    @login_required
+    def agency_report_link_create():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            _link, token = create_site_report_link(
+                g.user["id"],
+                request.form.get("period") or date.today().isoformat()[:7],
+                request.form.get("title", ""),
+            )
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(f"{translate('flash.report_created')} {url_for('public_site_report', token=token, _external=True)}", "success")
+        return redirect(url_for("agency_reports"))
+
+    @app.route("/site-manager/reports/<int:link_id>/revoke", methods=("POST",))
+    @login_required
+    def agency_report_link_revoke(link_id):
+        try:
+            revoke_site_report_link(g.user["id"], link_id)
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.report_revoked"), "success")
+        return redirect(url_for("agency_reports"))
+
+    @app.route("/reports/<token>")
+    def public_site_report(token):
+        link = get_site_report_link(token)
+        if not link:
+            abort(404)
+        report = build_public_site_report(link)
+        if request.args.get("format") == "json":
+            return jsonify({"ok": True, "report": to_jsonable(report)})
+        return render_template("public_report.html", report=report)
+
+    @app.route("/api/notifications")
+    @login_required
+    def api_notifications_list():
+        notifications = list_notifications(g.user["id"])
+        return jsonify(
+            {
+                "ok": True,
+                "notifications": to_jsonable(notifications),
+                "unread_count": count_unread_notifications(g.user["id"]),
+            }
+        )
+
+    @app.route("/api/notifications/<int:notification_id>/read", methods=("POST",))
+    @login_required
+    def api_notification_read(notification_id):
+        try:
+            mark_notification_read(g.user["id"], notification_id)
+        except ValueError as error:
+            return api_error(str(error), 404)
+        return jsonify({"ok": True, "unread_count": count_unread_notifications(g.user["id"])})
+
+    @app.route("/api/notifications/read-all", methods=("POST",))
+    @login_required
+    def api_notifications_read_all():
+        mark_all_notifications_read(g.user["id"])
+        return jsonify({"ok": True, "unread_count": 0})
+
+    @app.route("/notifications")
+    @login_required
+    def notifications_page():
+        return render_template(
+            "notifications.html",
+            notifications=list_notifications(g.user["id"]),
+            unread_count=count_unread_notifications(g.user["id"]),
+        )
+
+    @app.route("/notifications/<int:notification_id>/read", methods=("POST",))
+    @login_required
+    def notifications_mark_read(notification_id):
+        try:
+            mark_notification_read(g.user["id"], notification_id)
+        except ValueError as error:
+            flash(str(error), "warning")
+        return redirect(url_for("notifications_page"))
+
+    @app.route("/notifications/read-all", methods=("POST",))
+    @login_required
+    def notifications_mark_all_read():
+        mark_all_notifications_read(g.user["id"])
+        return redirect(url_for("notifications_page"))
+
+    @app.route("/r/<token>")
+    def portal_index(token):
+        link = get_client_link(token)
+        if not link:
+            return render_template("portal/invalid.html"), 404
+        return render_template(
+            "portal/index.html", link=link, token=token, requests=list_link_requests(link)
+        )
+
+    @app.route("/r/<token>/preview/<path:filepath>")
+    def portal_preview_file(token, filepath):
+        link = get_client_link(token)
+        if not link:
+            abort(404)
+        response = serve_link_preview_file(link, filepath, picker="picker" in request.args)
+        if response is None:
+            abort(404)
+        return response
+
+    @app.route("/r/<token>/requests", methods=("POST",))
+    def portal_request_create(token):
+        link = get_client_link(token)
+        if not link:
+            return api_error(translate("portal.invalid_link"), 404)
+        try:
+            thread = create_client_request(link, request.form, request.files)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "request": to_jsonable(thread)})
+
+    @app.route("/r/<token>/requests/<int:request_id>")
+    def portal_request_detail(token, request_id):
+        link = get_client_link(token)
+        if not link:
+            return render_template("portal/invalid.html"), 404
+        thread = get_portal_request_thread(link, request_id)
+        if not thread:
+            return render_template("portal/invalid.html"), 404
+        return render_template("portal/thread.html", link=link, token=token, thread=thread)
+
+    @app.route("/r/<token>/requests/<int:request_id>/comments", methods=("POST",))
+    def portal_comment_create(token, request_id):
+        link = get_client_link(token)
+        if not link:
+            return api_error(translate("portal.invalid_link"), 404)
+        try:
+            thread = portal_add_comment(
+                link, request_id, request.form.get("client_name", ""),
+                request.form.get("body", ""), files=request.files if request.files else None,
+            )
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "request": to_jsonable(thread)})
+
+    @app.route("/r/<token>/requests/<int:request_id>/approve", methods=("POST",))
+    def portal_request_approve(token, request_id):
+        link = get_client_link(token)
+        if not link:
+            return api_error(translate("portal.invalid_link"), 404)
+        try:
+            thread = portal_decide_request(link, request_id, "approved")
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "request": to_jsonable(thread)})
+
+    @app.route("/r/<token>/requests/<int:request_id>/reject", methods=("POST",))
+    def portal_request_reject(token, request_id):
+        link = get_client_link(token)
+        if not link:
+            return api_error(translate("portal.invalid_link"), 404)
+        try:
+            thread = portal_decide_request(link, request_id, "rejected")
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "request": to_jsonable(thread)})
+
+    @app.route("/r/<token>/attachments/<filename>")
+    def portal_attachment(token, filename):
+        link = get_client_link(token)
+        if not link:
+            abort(404)
+        attachment = get_portal_attachment(link, filename)
+        if not attachment:
+            abort(404)
+        return send_from_directory(
+            request_attachment_directory(),
+            posixpath.basename(attachment["filename"]),
+            mimetype=attachment["mime"] or "application/octet-stream",
+        )
+
+    @app.route("/api/site-manager/site")
+    @login_required
+    def api_site_settings():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            site = get_site_settings(g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "site": to_jsonable(site)})
+
+    @app.route("/api/site-manager/site", methods=("POST",))
+    @login_required
+    def api_site_settings_update():
+        ensure_default_site_directory(g.user["id"])
+        data = request_payload()
+        try:
+            with site_operation_lock(g.user["id"]):
+                site = update_site_settings(
+                    g.user["id"],
+                    display_name=data.get("display_name"),
+                    client_name=data.get("client_name"),
+                    brand=data.get("brand"),
+                    gsc_property=data.get("gsc_property"),
+                )
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "site": to_jsonable(site)})
+
+    @app.route("/api/site-manager/site/logo", methods=("POST",))
+    @login_required
+    def api_site_logo_upload():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            with site_operation_lock(g.user["id"]):
+                site = save_site_logo(g.user["id"], request.files.get("logo"))
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "site": to_jsonable(site)})
+
+    @app.route("/site-manager/site", methods=("GET", "POST"))
+    @login_required
+    def site_settings():
+        ensure_default_site_directory(g.user["id"])
+        if request.method == "POST":
+            form = request.form
+            brand = {
+                "business_name": form.get("brand_business_name", ""),
+                "tagline": form.get("brand_tagline", ""),
+                "services": form.get("brand_services", ""),
+                "audience": form.get("brand_audience", ""),
+                "tone": form.get("brand_tone", ""),
+                "colors": {
+                    "primary": form.get("brand_color_primary", ""),
+                    "secondary": form.get("brand_color_secondary", ""),
+                    "accent": form.get("brand_color_accent", ""),
+                },
+                "fonts": {
+                    "headings": form.get("brand_font_headings", ""),
+                    "body": form.get("brand_font_body", ""),
+                },
+                "phone": form.get("brand_phone", ""),
+                "email": form.get("brand_email", ""),
+                "address": form.get("brand_address", ""),
+                "website": form.get("brand_website", ""),
+                "notes": form.get("brand_notes", ""),
+            }
+            try:
+                with site_operation_lock(g.user["id"]):
+                    update_site_settings(
+                        g.user["id"],
+                        display_name=form.get("display_name"),
+                        client_name=form.get("client_name"),
+                        brand=brand,
+                        gsc_property=form.get("gsc_property"),
+                    )
+            except (TeamAccessDenied, ValueError) as error:
+                flash(str(error), "warning")
+            else:
+                flash(translate("flash.site_saved"), "success")
+            return redirect(url_for("site_settings"))
+        try:
+            site = get_site_settings(g.user["id"])
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+            return redirect(url_for("site_manager"))
+        gsc = build_search_console_dashboard(g.user["id"])
+        return render_template("site_settings.html", site=site, gsc=gsc)
+
+    @app.route("/site-manager/site/logo", methods=("POST",))
+    @login_required
+    def site_logo_upload():
+        ensure_default_site_directory(g.user["id"])
+        try:
+            with site_operation_lock(g.user["id"]):
+                save_site_logo(g.user["id"], request.files.get("logo"))
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.logo_saved"), "success")
+        return redirect(url_for("site_settings"))
+
+    @app.route("/api/teams")
+    @login_required
+    def api_teams_list():
+        return jsonify(
+            {
+                "ok": True,
+                "teams": to_jsonable(get_user_teams(g.user["id"])),
+                "pending_invites": to_jsonable(get_user_pending_invites(g.user["id"])),
+            }
+        )
+
+    @app.route("/api/teams", methods=("POST",))
+    @login_required
+    def api_teams_create():
+        data = request_payload()
+        try:
+            team = create_team(
+                g.user["id"], data.get("name", ""), data.get("description", "")
+            )
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "team": to_jsonable(team)})
+
+    @app.route("/api/teams/<int:team_id>")
+    @login_required
+    def api_team_detail(team_id):
+        try:
+            team, membership = require_team_membership(team_id, g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 404)
+        return jsonify(
+            {
+                "ok": True,
+                "team": to_jsonable(serialize_team(team, membership)),
+                "members": to_jsonable(get_team_members(team["id"])),
+                "invites": to_jsonable(get_pending_team_invites(team["id"])),
+                "projects": to_jsonable(get_team_projects(team["id"])),
+            }
+        )
+
+    @app.route("/api/teams/<int:team_id>", methods=("POST",))
+    @login_required
+    def api_team_update(team_id):
+        data = request_payload()
+        try:
+            team = update_team(
+                team_id,
+                g.user["id"],
+                name=data.get("name"),
+                description=data.get("description"),
+            )
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "team": to_jsonable(team)})
+
+    @app.route("/api/teams/<int:team_id>", methods=("DELETE",))
+    @login_required
+    def api_team_delete(team_id):
+        try:
+            delete_team(team_id, g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 404)
+        return jsonify({"ok": True})
+
+    @app.route("/api/teams/<int:team_id>/invites", methods=("POST",))
+    @login_required
+    def api_team_invite_create(team_id):
+        data = request_payload()
+        try:
+            invite, token = invite_team_member(
+                team_id, g.user["id"], data.get("email", ""), data.get("role", "editor")
+            )
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        invite_link = url_for("team_invite_landing", token=token, _external=True)
+        email_sent = True
+        try:
+            team = require_team(team_id)
+            send_team_invite_email(team["name"], invite["email"], invite_link)
+        except ValueError:
+            email_sent = False
+        return jsonify(
+            {
+                "ok": True,
+                "invite": to_jsonable(invite),
+                "invite_link": invite_link,
+                "email_sent": email_sent,
+            }
+        )
+
+    @app.route("/api/teams/<int:team_id>/invites/<int:invite_id>", methods=("DELETE",))
+    @login_required
+    def api_team_invite_revoke(team_id, invite_id):
+        try:
+            revoke_team_invite(team_id, g.user["id"], invite_id)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True})
+
+    @app.route("/api/teams/invites/accept", methods=("POST",))
+    @login_required
+    def api_team_invite_accept():
+        data = request_payload()
+        try:
+            team = accept_team_invite((data.get("token") or "").strip(), g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "team": to_jsonable(team)})
+
+    @app.route("/api/teams/invites/<int:invite_id>/accept", methods=("POST",))
+    @login_required
+    def api_team_invite_accept_by_id(invite_id):
+        try:
+            team = accept_team_invite_by_id(invite_id, g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "team": to_jsonable(team)})
+
+    @app.route("/api/teams/<int:team_id>/members/<int:user_id>", methods=("POST",))
+    @login_required
+    def api_team_member_update(team_id, user_id):
+        data = request_payload()
+        try:
+            members = update_team_member(
+                team_id,
+                g.user["id"],
+                user_id,
+                role=data.get("role"),
+                permissions=data.get("permissions"),
+            )
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "members": to_jsonable(members)})
+
+    @app.route("/api/teams/<int:team_id>/members/<int:user_id>", methods=("DELETE",))
+    @login_required
+    def api_team_member_remove(team_id, user_id):
+        try:
+            members = remove_team_member(team_id, g.user["id"], user_id)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "members": to_jsonable(members)})
+
+    @app.route("/api/teams/<int:team_id>/leave", methods=("POST",))
+    @login_required
+    def api_team_leave(team_id):
+        try:
+            leave_team(team_id, g.user["id"])
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True})
+
+    @app.route("/api/teams/<int:team_id>/transfer", methods=("POST",))
+    @login_required
+    def api_team_transfer(team_id):
+        data = request_payload()
+        try:
+            members = transfer_team_ownership(team_id, g.user["id"], data.get("user_id"))
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "members": to_jsonable(members)})
+
+    @app.route("/api/teams/<int:team_id>/projects", methods=("POST",))
+    @login_required
+    def api_team_project_add(team_id):
+        data = request_payload()
+        try:
+            with site_operation_lock(g.user["id"]):
+                project = add_team_project(
+                    team_id, g.user["id"], project_id=data.get("project_id"), path=data.get("path")
+                )
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True, "project": to_jsonable(project)})
+
+    @app.route("/api/teams/<int:team_id>/projects/<int:project_id>", methods=("DELETE",))
+    @login_required
+    def api_team_project_remove(team_id, project_id):
+        try:
+            with site_operation_lock(g.user["id"]):
+                remove_team_project(team_id, g.user["id"], project_id)
+        except TeamAccessDenied as error:
+            return api_error(str(error), 403)
+        except ValueError as error:
+            return api_error(str(error), 400)
+        return jsonify({"ok": True})
+
+    @app.route("/teams", methods=("GET", "POST"))
+    @login_required
+    def teams_list():
+        if request.method == "POST":
+            try:
+                team = create_team(
+                    g.user["id"],
+                    request.form.get("name", ""),
+                    request.form.get("description", ""),
+                )
+            except ValueError as error:
+                flash(str(error), "warning")
+                return redirect(url_for("teams_list"))
+            flash(translate("flash.team_created"), "success")
+            return redirect(url_for("team_detail", team_id=team["id"]))
+        return render_template(
+            "teams/list.html",
+            teams=get_user_teams(g.user["id"]),
+            pending_invites=get_user_pending_invites(g.user["id"]),
+        )
+
+    @app.route("/teams/<int:team_id>")
+    @login_required
+    def team_detail(team_id):
+        try:
+            team, membership = require_team_membership(team_id, g.user["id"])
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+            return redirect(url_for("teams_list"))
+        personal_projects = [item for item in list_site_projects(g.user["id"]) if item["scope"] == "personal"]
+        return render_template(
+            "teams/detail.html",
+            team=serialize_team(team, membership),
+            members=get_team_members(team["id"]),
+            invites=get_pending_team_invites(team["id"]),
+            projects=get_team_projects(team["id"]),
+            personal_projects=personal_projects,
+            permissions=TEAM_PERMISSIONS,
+            invite_roles=TEAM_INVITE_ROLES,
+            member_roles=TEAM_MEMBER_ROLES,
+        )
+
+    @app.route("/teams/<int:team_id>/update", methods=("POST",))
+    @login_required
+    def team_update(team_id):
+        try:
+            update_team(
+                team_id,
+                g.user["id"],
+                name=request.form.get("name"),
+                description=request.form.get("description"),
+            )
+        except TeamAccessDenied as error:
+            flash(str(error), "warning")
+        except ValueError as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.team_updated"), "success")
+        return redirect(url_for("team_detail", team_id=team_id))
+
+    @app.route("/teams/<int:team_id>/delete", methods=("POST",))
+    @login_required
+    def team_delete(team_id):
+        try:
+            delete_team(team_id, g.user["id"])
+        except TeamAccessDenied as error:
+            flash(str(error), "warning")
+            return redirect(url_for("team_detail", team_id=team_id))
+        except ValueError as error:
+            flash(str(error), "warning")
+            return redirect(url_for("teams_list"))
+        flash(translate("flash.team_deleted"), "success")
+        return redirect(url_for("teams_list"))
+
+    @app.route("/teams/<int:team_id>/invites", methods=("POST",))
+    @login_required
+    def team_invite_create(team_id):
+        try:
+            invite, token = invite_team_member(
+                team_id, g.user["id"], request.form.get("email", ""), request.form.get("role", "editor")
+            )
+        except TeamAccessDenied as error:
+            flash(str(error), "warning")
+            return redirect(url_for("team_detail", team_id=team_id))
+        except ValueError as error:
+            flash(str(error), "warning")
+            return redirect(url_for("team_detail", team_id=team_id))
+        invite_link = url_for("team_invite_landing", token=token, _external=True)
+        try:
+            team = require_team(team_id)
+            send_team_invite_email(team["name"], invite["email"], invite_link)
+        except ValueError:
+            flash(f"{translate('flash.invite_link_ready')} {invite_link}", "info")
+        else:
+            flash(translate("flash.invite_sent"), "success")
+        return redirect(url_for("team_detail", team_id=team_id))
+
+    @app.route("/teams/<int:team_id>/invites/<int:invite_id>/revoke", methods=("POST",))
+    @login_required
+    def team_invite_revoke(team_id, invite_id):
+        try:
+            revoke_team_invite(team_id, g.user["id"], invite_id)
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.invite_revoked"), "success")
+        return redirect(url_for("team_detail", team_id=team_id))
+
+    @app.route("/teams/invites/<token>")
+    def team_invite_landing(token):
+        invite = get_valid_team_invite(token)
+        if not invite:
+            flash(translate("flash.invite_invalid"), "warning")
+            return redirect(url_for("teams_list" if g.user else "login"))
+        return render_template("teams/invite.html", invite=invite)
+
+    @app.route("/teams/invites/<token>/accept", methods=("POST",))
+    @login_required
+    def team_invite_accept_token(token):
+        try:
+            team = accept_team_invite(token, g.user["id"])
+        except TeamAccessDenied as error:
+            flash(str(error), "warning")
+            return redirect(url_for("team_invite_landing", token=token))
+        except ValueError as error:
+            flash(str(error), "warning")
+            return redirect(url_for("teams_list"))
+        flash(translate("flash.invite_accepted"), "success")
+        return redirect(url_for("team_detail", team_id=team["id"]))
+
+    @app.route("/teams/invites/<int:invite_id>/accept", methods=("POST",))
+    @login_required
+    def team_invite_accept_id(invite_id):
+        try:
+            team = accept_team_invite_by_id(invite_id, g.user["id"])
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+            return redirect(url_for("teams_list"))
+        flash(translate("flash.invite_accepted"), "success")
+        return redirect(url_for("team_detail", team_id=team["id"]))
+
+    @app.route("/teams/<int:team_id>/members/<int:user_id>/update", methods=("POST",))
+    @login_required
+    def team_member_update(team_id, user_id):
+        selected = {key for key in TEAM_PERMISSIONS if request.form.get(f"perm_{key}") == "1"}
+        selected.add("view")
+        permissions = {key: key in selected for key in TEAM_PERMISSIONS}
+        try:
+            update_team_member(
+                team_id, g.user["id"], user_id,
+                role=request.form.get("role"), permissions=permissions,
+            )
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.member_updated"), "success")
+        return redirect(url_for("team_detail", team_id=team_id))
+
+    @app.route("/teams/<int:team_id>/members/<int:user_id>/remove", methods=("POST",))
+    @login_required
+    def team_member_remove(team_id, user_id):
+        try:
+            remove_team_member(team_id, g.user["id"], user_id)
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.member_removed"), "success")
+        return redirect(url_for("team_detail", team_id=team_id))
+
+    @app.route("/teams/<int:team_id>/leave", methods=("POST",))
+    @login_required
+    def team_leave(team_id):
+        try:
+            leave_team(team_id, g.user["id"])
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+            return redirect(url_for("team_detail", team_id=team_id))
+        flash(translate("flash.left_team"), "success")
+        return redirect(url_for("teams_list"))
+
+    @app.route("/teams/<int:team_id>/transfer", methods=("POST",))
+    @login_required
+    def team_transfer(team_id):
+        try:
+            transfer_team_ownership(team_id, g.user["id"], request.form.get("user_id"))
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.ownership_transferred"), "success")
+        return redirect(url_for("team_detail", team_id=team_id))
+
+    @app.route("/teams/<int:team_id>/projects", methods=("POST",))
+    @login_required
+    def team_project_add(team_id):
+        try:
+            with site_operation_lock(g.user["id"]):
+                add_team_project(
+                    team_id,
+                    g.user["id"],
+                    project_id=request.form.get("project_id") or None,
+                    path=request.form.get("path") or None,
+                )
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.team_project_added"), "success")
+        return redirect(url_for("team_detail", team_id=team_id))
+
+    @app.route("/teams/<int:team_id>/projects/<int:project_id>/remove", methods=("POST",))
+    @login_required
+    def team_project_remove(team_id, project_id):
+        try:
+            with site_operation_lock(g.user["id"]):
+                remove_team_project(team_id, g.user["id"], project_id)
+        except (TeamAccessDenied, ValueError) as error:
+            flash(str(error), "warning")
+        else:
+            flash(translate("flash.team_project_removed"), "success")
+        return redirect(url_for("team_detail", team_id=team_id))
 
     @app.route("/api/security-scan")
     @login_required
@@ -2088,8 +4966,17 @@ def create_app():
                     "client_id_configured": bool(google_credentials["client_id"]),
                     "client_secret_configured": bool(google_credentials["client_secret"]),
                     "redirect_uri": google_redirect_uri(),
+                    "suggested_uris": suggested_google_redirect_uris(),
                 },
             }
+        )
+
+    @app.route("/api/settings/google/diagnostics")
+    @login_required
+    def api_settings_google_diagnostics():
+        uris = suggested_google_redirect_uris()
+        return jsonify(
+            {"ok": True, "checks": [diagnose_google_redirect_uri(uri) for uri in uris]}
         )
 
     @app.route("/api/settings/account", methods=("POST",))
@@ -2297,14 +5184,23 @@ def create_app():
     def site_manager():
         ensure_default_site_directory(g.user["id"])
         manager = build_site_manager(g.user["id"])
-        return render_template("site_manager.html", manager=manager, terminal=None, command="")
+        tab = (request.args.get("tab") or "studio").strip().lower()
+        if tab not in ("studio", "files", "remote", "preview"):
+            tab = "studio"
+        return render_template("site_manager.html", manager=manager, terminal=None, command="", tab=tab)
 
     @app.route("/site-manager/connect", methods=("POST",))
     @login_required
     def site_manager_connect():
         path = request.form.get("path", "").strip()
+        project_id = request.form.get("project_id", "").strip()
         try:
-            connect_site_directory(g.user["id"], path)
+            if project_id:
+                connect_site_project(g.user["id"], project_id=project_id)
+            elif path:
+                connect_site_project(g.user["id"], path=path)
+            else:
+                connect_site_directory(g.user["id"], path)
         except ValueError as error:
             flash(str(error), "warning")
             return redirect(url_for("site_manager"))
@@ -2316,6 +5212,7 @@ def create_app():
     @login_required
     def site_manager_remote_connect():
         try:
+            require_project_permission(g.user["id"], "publish")
             save_remote_connection(
                 g.user["id"],
                 request.form.get("host", "").strip(),
@@ -2347,6 +5244,7 @@ def create_app():
     @login_required
     def site_manager_remote_sync():
         try:
+            require_project_permission(g.user["id"], "publish")
             sync_remote_site_to_workspace(g.user["id"])
         except ValueError as error:
             flash(translate("flash.remote_sync_failed", error=error), "warning")
@@ -2359,6 +5257,7 @@ def create_app():
     def site_manager_file_delete():
         file_path = request.form.get("path", "").strip()
         try:
+            require_project_permission(g.user["id"], "edit")
             delete_site_file(g.user["id"], file_path)
         except ValueError as error:
             flash(translate("site.file_delete_failed", error=error), "danger")
@@ -2372,6 +5271,7 @@ def create_app():
     def site_manager_file_raw():
         file_path = request.args.get("path", "").strip()
         try:
+            require_project_permission(g.user["id"], "view")
             absolute_path = resolve_site_file(g.user["id"], file_path)
         except ValueError:
             abort(404)
@@ -2387,6 +5287,7 @@ def create_app():
         terminal = None
 
         try:
+            require_project_permission(g.user["id"], "edit")
             terminal = run_site_terminal_command(g.user["id"], command)
         except ValueError as error:
             flash(str(error), "warning")
@@ -2405,12 +5306,15 @@ def create_app():
         terminal = None
 
         try:
+            require_project_permission(g.user["id"], "edit")
             if not prompt:
                 raise ValueError(translate("flash.codex_prompt_required"))
             image_path = selected_asset or save_codex_suggested_image(g.user["id"], suggested_image)
             if selected_asset:
                 validate_asset_path(g.user["id"], selected_asset)
-            terminal = run_site_codex_update(g.user["id"], prompt, image_path)
+            selection = session.get(PREVIEW_SELECTION_KEY)
+            terminal = run_site_codex_update(g.user["id"], prompt, image_path, selection=selection)
+            session.pop(PREVIEW_SELECTION_KEY, None)
         except ValueError as error:
             flash(str(error), "warning")
 
@@ -2421,6 +5325,7 @@ def create_app():
     @login_required
     def site_manager_asset_upload():
         try:
+            require_project_permission(g.user["id"], "edit")
             upload = request.files.get("asset")
             if not upload or not upload.filename:
                 raise ValueError(translate("flash.asset_required"))
@@ -2434,6 +5339,7 @@ def create_app():
     def site_manager_asset_raw():
         asset_path = request.args.get("path", "").strip()
         try:
+            require_project_permission(g.user["id"], "view")
             validate_asset_path(g.user["id"], asset_path)
             absolute_path = resolve_site_file(g.user["id"], asset_path, allow_oneboard=True)
         except ValueError:
@@ -2454,8 +5360,10 @@ def create_app():
             request.form.get("tone", "").strip(),
             request.form.get("audience", "").strip(),
             request.form.get("cta", "").strip(),
+            brand_context=current_workspace_brand_text(g.user["id"]),
         )
         try:
+            require_project_permission(g.user["id"], "edit")
             terminal = run_site_codex_update(g.user["id"], prompt)
         except (ValueError, OSError, zipfile.BadZipFile, KeyError, TypeError) as error:
             flash(str(error), "warning")
@@ -2479,11 +5387,18 @@ def create_app():
         action = request.form.get("action", "").strip()
         try:
             if action == "approve":
+                require_project_permission(g.user["id"], "publish")
                 set_update_status(g.user["id"], update_id, "approved")
             elif action == "publish":
-                publish_site_to_remote(g.user["id"], update_id)
+                require_project_permission(g.user["id"], "publish")
+                try:
+                    publish_site_to_remote(g.user["id"], update_id)
+                except Exception as error:
+                    record_publish_alert(g.user["id"], error)
+                    raise
                 flash(translate("flash.remote_published"), "success")
             elif action == "restore":
+                require_project_permission(g.user["id"], "edit")
                 restore_update_files(g.user["id"], update_id)
             else:
                 raise ValueError("Unknown action.")
@@ -2498,6 +5413,7 @@ def create_app():
         keyword = request.form.get("keyword", "").strip()
         prompt = build_seo_page_codex_prompt(title, keyword)
         try:
+            require_project_permission(g.user["id"], "edit")
             run_site_codex_update(g.user["id"], prompt)
         except ValueError as error:
             flash(str(error), "warning")
@@ -2513,7 +5429,10 @@ def create_app():
     def site_manager_terminal_run():
         command = request.form.get("command", "").strip()
         try:
+            require_project_permission(g.user["id"], "edit")
             terminal = run_site_terminal_command(g.user["id"], command)
+        except TeamAccessDenied as error:
+            return jsonify({"ok": False, "error": str(error)}), 403
         except ValueError as error:
             return jsonify({"ok": False, "error": str(error)}), 400
 
@@ -2523,6 +5442,7 @@ def create_app():
     @login_required
     def site_manager_backup():
         try:
+            require_project_permission(g.user["id"], "edit")
             create_site_backup(g.user["id"])
         except (ValueError, OSError, zipfile.BadZipFile) as error:
             flash(translate("flash.backup_failed", error=error), "danger")
@@ -2542,6 +5462,7 @@ def create_app():
             return redirect(url_for("site_manager"))
 
         try:
+            require_project_permission(g.user["id"], "edit")
             restore_site_backup(g.user["id"], backup_id)
         except (ValueError, OSError, zipfile.BadZipFile) as error:
             flash(translate("flash.restore_failed", error=error), "danger")
@@ -2686,6 +5607,7 @@ def create_app():
             "client_id_configured": bool(google_credentials["client_id"]),
             "client_secret_configured": bool(google_credentials["client_secret"]),
             "redirect_uri": google_redirect_uri(),
+            "suggested_uris": suggested_google_redirect_uris(),
         }
         return render_template("settings.html", account=account, google_config=google_config)
 
@@ -2773,16 +5695,17 @@ def create_app():
     @login_required
     def google_search_console_disconnect():
         connection = get_google_connection(g.user["id"])
-        try:
-            if connection:
+        if connection:
+            try:
                 revoke_google_connection(connection)
-            execute_db(
-                "DELETE FROM google_search_console_connections WHERE user_id = ?",
-                (g.user["id"],),
-            )
-        except GoogleApiError as error:
-            flash(translate("flash.search_console_failed", error=error), "danger")
-            return redirect(url_for("dashboard"))
+            except GoogleApiError as error:
+                # Same as the API route: a dead token must not block the
+                # local disconnect. The row is deleted below either way.
+                flash(translate("flash.search_console_revoke_failed", error=error), "warning")
+        execute_db(
+            "DELETE FROM google_search_console_connections WHERE user_id = ?",
+            (g.user["id"],),
+        )
         flash(translate("flash.search_console_disconnected"), "info")
         return redirect(url_for("dashboard"))
 
@@ -2830,8 +5753,9 @@ def query_db(query, args=(), one=False):
 
 def execute_db(query, args=()):
     db = get_db()
-    db.execute(query, args)
+    cursor = db.execute(query, args)
     db.commit()
+    return cursor.lastrowid
 
 
 def api_error(message, status=400):
@@ -3003,10 +5927,327 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             path TEXT NOT NULL,
+            team_id INTEGER,
+            display_name TEXT NOT NULL DEFAULT '',
+            client_name TEXT NOT NULL DEFAULT '',
+            brand_json TEXT,
+            gsc_property TEXT NOT NULL DEFAULT '',
             last_opened_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE (user_id, path),
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            FOREIGN KEY (team_id) REFERENCES teams (id)
+        )
+        """
+    )
+    ensure_column("website_workspaces", "team_id", "INTEGER")
+    ensure_column("website_workspaces", "display_name", "TEXT NOT NULL DEFAULT ''")
+    ensure_column("website_workspaces", "client_name", "TEXT NOT NULL DEFAULT ''")
+    ensure_column("website_workspaces", "brand_json", "TEXT")
+    ensure_column("website_workspaces", "gsc_property", "TEXT NOT NULL DEFAULT ''")
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS site_scans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            directory_path TEXT NOT NULL,
+            started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            finished_at TIMESTAMP,
+            files_checked INTEGER NOT NULL DEFAULT 0,
+            open_count INTEGER NOT NULL DEFAULT 0,
+            skipped_external INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS site_findings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            directory_path TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
+            check_type TEXT NOT NULL,
+            severity TEXT NOT NULL DEFAULT 'warning',
+            page TEXT NOT NULL DEFAULT '',
+            detail TEXT NOT NULL DEFAULT '',
+            proposal TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'open',
+            resolved_by TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            resolved_at TIMESTAMP,
+            last_seen_at TIMESTAMP,
+            last_seen_scan_id INTEGER,
+            UNIQUE (directory_path, fingerprint),
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS request_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_id INTEGER NOT NULL,
+            label TEXT NOT NULL DEFAULT '',
+            token_hash TEXT NOT NULL UNIQUE,
+            created_by INTEGER,
+            expires_at INTEGER,
+            revoked INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (workspace_id) REFERENCES website_workspaces (id),
+            FOREIGN KEY (created_by) REFERENCES users (id)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS client_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_id INTEGER NOT NULL,
+            link_id INTEGER,
+            page TEXT NOT NULL DEFAULT '',
+            selector TEXT NOT NULL DEFAULT '',
+            tag TEXT NOT NULL DEFAULT '',
+            text TEXT NOT NULL DEFAULT '',
+            html_excerpt TEXT NOT NULL DEFAULT '',
+            image_src TEXT NOT NULL DEFAULT '',
+            client_name TEXT NOT NULL DEFAULT '',
+            message TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'open',
+            proposal_text TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (workspace_id) REFERENCES website_workspaces (id),
+            FOREIGN KEY (link_id) REFERENCES request_links (id)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS request_comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id INTEGER NOT NULL,
+            side TEXT NOT NULL DEFAULT 'client',
+            user_id INTEGER,
+            author_name TEXT NOT NULL DEFAULT '',
+            body TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (request_id) REFERENCES client_requests (id),
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS request_attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id INTEGER NOT NULL,
+            comment_id INTEGER,
+            filename TEXT NOT NULL UNIQUE,
+            original_name TEXT NOT NULL DEFAULT '',
+            mime TEXT NOT NULL DEFAULT '',
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            side TEXT NOT NULL DEFAULT 'client',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (request_id) REFERENCES client_requests (id),
+            FOREIGN KEY (comment_id) REFERENCES request_comments (id)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS scheduled_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_id INTEGER NOT NULL,
+            created_by INTEGER,
+            kind TEXT NOT NULL DEFAULT 'note',
+            title TEXT NOT NULL DEFAULT '',
+            brief TEXT NOT NULL DEFAULT '',
+            page TEXT NOT NULL DEFAULT '',
+            starts_on TEXT NOT NULL DEFAULT '',
+            ends_on TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'scheduled',
+            update_id INTEGER,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (workspace_id) REFERENCES website_workspaces (id),
+            FOREIGN KEY (created_by) REFERENCES users (id)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS contact_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_id INTEGER NOT NULL,
+            page TEXT NOT NULL DEFAULT '',
+            name TEXT NOT NULL DEFAULT '',
+            email TEXT NOT NULL DEFAULT '',
+            phone TEXT NOT NULL DEFAULT '',
+            message TEXT NOT NULL DEFAULT '',
+            meta TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'new',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (workspace_id) REFERENCES website_workspaces (id)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS form_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_id INTEGER NOT NULL,
+            label TEXT NOT NULL DEFAULT '',
+            token TEXT NOT NULL DEFAULT '',
+            token_hash TEXT NOT NULL UNIQUE,
+            created_by INTEGER,
+            revoked INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (workspace_id) REFERENCES website_workspaces (id),
+            FOREIGN KEY (created_by) REFERENCES users (id)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS alert_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_id INTEGER NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'uptime',
+            target TEXT NOT NULL DEFAULT '',
+            name TEXT NOT NULL DEFAULT '',
+            threshold_days INTEGER NOT NULL DEFAULT 14,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            last_status TEXT NOT NULL DEFAULT '',
+            last_detail TEXT NOT NULL DEFAULT '',
+            last_checked_at TIMESTAMP,
+            created_by INTEGER,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (workspace_id) REFERENCES website_workspaces (id),
+            FOREIGN KEY (created_by) REFERENCES users (id)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS site_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_id INTEGER NOT NULL,
+            rule_id INTEGER,
+            kind TEXT NOT NULL DEFAULT 'uptime',
+            severity TEXT NOT NULL DEFAULT 'error',
+            title TEXT NOT NULL DEFAULT '',
+            detail TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'open',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            resolved_at TIMESTAMP,
+            FOREIGN KEY (workspace_id) REFERENCES website_workspaces (id),
+            FOREIGN KEY (rule_id) REFERENCES alert_rules (id)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS site_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_id INTEGER NOT NULL,
+            period TEXT NOT NULL DEFAULT '',
+            title TEXT NOT NULL DEFAULT '',
+            token_hash TEXT NOT NULL UNIQUE,
+            created_by INTEGER,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (workspace_id) REFERENCES website_workspaces (id),
+            FOREIGN KEY (created_by) REFERENCES users (id)
+        )
+        """
+    )
+    ensure_column("form_tokens", "token", "TEXT NOT NULL DEFAULT ''")
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            workspace_id INTEGER,
+            kind TEXT NOT NULL DEFAULT 'inbox',
+            title TEXT NOT NULL DEFAULT '',
+            detail TEXT NOT NULL DEFAULT '',
+            link TEXT NOT NULL DEFAULT '',
+            read INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            FOREIGN KEY (workspace_id) REFERENCES website_workspaces (id)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS site_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            workspace_id INTEGER,
+            filename TEXT NOT NULL UNIQUE,
+            prompt TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            FOREIGN KEY (workspace_id) REFERENCES website_workspaces (id)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_website_workspaces_team_path
+        ON website_workspaces (team_id, path)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS teams (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            owner_id INTEGER NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (owner_id) REFERENCES users (id)
+        )
+        """
+    )
+    ensure_column("teams", "description", "TEXT NOT NULL DEFAULT ''")
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS team_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            team_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            role TEXT NOT NULL DEFAULT 'viewer',
+            permissions TEXT,
+            invited_by INTEGER,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (team_id, user_id),
+            FOREIGN KEY (team_id) REFERENCES teams (id),
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            FOREIGN KEY (invited_by) REFERENCES users (id)
+        )
+        """
+    )
+    ensure_column("team_members", "permissions", "TEXT")
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS team_invites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            team_id INTEGER NOT NULL,
+            email TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'viewer',
+            permissions TEXT,
+            token_hash TEXT NOT NULL UNIQUE,
+            invited_by INTEGER,
+            expires_at INTEGER NOT NULL,
+            accepted_at INTEGER,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (team_id) REFERENCES teams (id),
+            FOREIGN KEY (invited_by) REFERENCES users (id)
         )
         """
     )
@@ -3029,7 +6270,7 @@ def init_db():
         """
         CREATE TABLE IF NOT EXISTS website_remote_connections (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL UNIQUE,
+            user_id INTEGER NOT NULL,
             host TEXT NOT NULL,
             port INTEGER NOT NULL DEFAULT 22,
             username TEXT NOT NULL,
@@ -3037,9 +6278,10 @@ def init_db():
             key_path TEXT,
             auth_method TEXT NOT NULL DEFAULT 'key',
             password TEXT,
-            directory_path TEXT,
+            directory_path TEXT NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (user_id, directory_path),
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
         """
@@ -3047,6 +6289,7 @@ def init_db():
     ensure_column("website_remote_connections", "auth_method", "TEXT NOT NULL DEFAULT 'key'")
     ensure_column("website_remote_connections", "password", "TEXT")
     ensure_column("website_remote_connections", "directory_path", "TEXT")
+    _migrate_remote_connections_per_site(db)
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS website_update_history (
@@ -3109,12 +6352,14 @@ def init_db():
             status TEXT NOT NULL DEFAULT 'queued',
             buffer_post_id TEXT,
             image_url TEXT,
+            post_type TEXT NOT NULL DEFAULT 'post',
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
         """
     )
     ensure_column("social_posts", "image_url", "TEXT")
+    ensure_column("social_posts", "post_type", "TEXT NOT NULL DEFAULT 'post'")
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS security_scan_history (
@@ -3174,6 +6419,83 @@ class SecurityScanError(Exception):
     pass
 
 
+class TeamAccessDenied(ValueError):
+    pass
+
+
+def _migrate_remote_connections_per_site(db):
+    """Rebuild legacy single-connection rows into one row per site.
+
+    Older databases declared ``user_id UNIQUE`` on website_remote_connections,
+    so each account could only keep a single remote target. The per-site model
+    keys rows by (user_id, directory_path) instead. Bound rows keep their
+    site; unbound rows are attached to the user's current directory when there
+    is one, and dropped otherwise.
+    """
+    table = db.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'website_remote_connections'"
+    ).fetchone()
+    if not table or "UNIQUE (user_id, directory_path)" in (table[0] or ""):
+        return
+    db.execute("ALTER TABLE website_remote_connections RENAME TO website_remote_connections_legacy")
+    db.execute(
+        """
+        CREATE TABLE website_remote_connections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            host TEXT NOT NULL,
+            port INTEGER NOT NULL DEFAULT 22,
+            username TEXT NOT NULL,
+            remote_path TEXT NOT NULL,
+            key_path TEXT,
+            auth_method TEXT NOT NULL DEFAULT 'key',
+            password TEXT,
+            directory_path TEXT NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (user_id, directory_path),
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+        """
+    )
+    columns = [row["name"] for row in db.execute("PRAGMA table_info(website_remote_connections_legacy)").fetchall()]
+    legacy_rows = db.execute("SELECT * FROM website_remote_connections_legacy").fetchall()
+    for legacy in legacy_rows:
+        values = dict(zip(columns, legacy))
+        directory_path = values.get("directory_path")
+        if not directory_path:
+            current = db.execute(
+                "SELECT path FROM website_directories WHERE user_id = ?", (values["user_id"],)
+            ).fetchone()
+            directory_path = current[0] if current else None
+        if not directory_path:
+            continue
+        db.execute(
+            """
+            INSERT OR IGNORE INTO website_remote_connections (
+                user_id, host, port, username, remote_path, key_path,
+                auth_method, password, directory_path, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                values["user_id"],
+                values["host"],
+                values.get("port") or 22,
+                values["username"],
+                values["remote_path"],
+                values.get("key_path"),
+                values.get("auth_method") or "key",
+                values.get("password"),
+                os.path.realpath(directory_path) if os.path.exists(directory_path) else directory_path,
+                values.get("created_at"),
+                values.get("updated_at"),
+            ),
+        )
+    db.execute("DROP TABLE website_remote_connections_legacy")
+    db.commit()
+
+
 def google_oauth_configured(credentials):
     return bool(credentials["client_id"] and credentials["client_secret"])
 
@@ -3203,15 +6525,99 @@ def get_google_oauth_credentials():
 
 
 def google_redirect_uri():
+    """OAuth callback URL sent to Google.
+
+    Uses GOOGLE_REDIRECT_URI when explicitly configured, otherwise derives it
+    from the current public request (scheme + host + callback path). The
+    derived value requires ProxyFix above when running behind cloudflared or
+    another reverse proxy. Google only accepts URIs registered in the OAuth
+    client, so the value shown in Settings must be added to the Google Cloud
+    Console "Authorized redirect URIs" list.
+    """
     configured_uri = os.environ.get("GOOGLE_REDIRECT_URI", "").strip()
     if configured_uri:
         return configured_uri
+    if not has_request_context():
+        raise GoogleApiError(
+            "GOOGLE_REDIRECT_URI is not set and there is no request to derive the callback URL from."
+        )
     return url_for("google_search_console_callback", _external=True)
 
 
 def google_native_redirect_uri():
     port = int(os.environ.get("PORT", "51249"))
     return f"http://127.0.0.1:{port}/api/google-search-console/callback"
+
+
+GOOGLE_AUTH_DIAG_TIMEOUT = 20
+GOOGLE_AUTH_DIAG_USER_AGENT = "Mozilla/5.0 (ONEBoard diagnostics)"
+
+
+def suggested_google_redirect_uris():
+    try:
+        current = google_redirect_uri()
+    except GoogleApiError:
+        return []
+    uris = [current]
+    try:
+        split = urllib.parse.urlsplit(current)
+    except ValueError:
+        return uris
+    host = split.hostname or ""
+    if host in ("127.0.0.1", "localhost"):
+        port = f":{split.port}" if split.port else ""
+        alt_host = "localhost" if host == "127.0.0.1" else "127.0.0.1"
+        alt = urllib.parse.urlunsplit((split.scheme, f"{alt_host}{port}", split.path, "", ""))
+        if alt not in uris:
+            uris.append(alt)
+    return uris
+
+
+def diagnose_google_redirect_uri(redirect_uri):
+    """Ask Google whether an OAuth redirect URI is registered.
+
+    Google validates the redirect URI before anything else, so requesting the
+    authorization URL reveals `redirect_uri_mismatch` (URI not registered) vs
+    the normal sign-in page (URI accepted) without user credentials.
+    """
+    result = {"redirect_uri": redirect_uri, "google_accepts": False, "reason": "unknown"}
+    credentials = get_google_oauth_credentials()
+    if not google_oauth_configured(credentials):
+        result["reason"] = "missing_credentials"
+        return result
+    params = {
+        "client_id": credentials["client_id"],
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": SEARCH_CONSOLE_SCOPE,
+        "state": "oneboard-diagnostics",
+    }
+    req = urllib.request.Request(
+        f"{GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}",
+        headers={"User-Agent": GOOGLE_AUTH_DIAG_USER_AGENT},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=GOOGLE_AUTH_DIAG_TIMEOUT) as response:
+            body = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as error:
+        try:
+            body = error.read().decode("utf-8", errors="replace")
+        except (OSError, ValueError):
+            body = ""
+    except urllib.error.URLError as error:
+        result["reason"] = "network"
+        result["detail"] = str(error.reason) if getattr(error, "reason", None) else str(error)
+        return result
+    lowered = body.lower()
+    if "redirect_uri_mismatch" in lowered:
+        result["reason"] = "mismatch"
+    elif "invalid_client" in lowered:
+        result["reason"] = "invalid_client"
+    elif "identifier" in lowered or "sign in" in lowered:
+        result["google_accepts"] = True
+        result["reason"] = "accepted"
+    return result
 
 
 def exchange_google_code(user_id, code, redirect_uri=None, code_verifier=None):
@@ -3485,6 +6891,8 @@ def build_search_console_dashboard(user_id):
         "connected": False,
         "sites": [],
         "selected_site_url": None,
+        "site_scoped": False,
+        "site_name": None,
         "date_range": search_console_date_range(),
         "stats": empty_search_stats(),
         "queries": [],
@@ -3516,14 +6924,24 @@ def build_search_console_dashboard(user_id):
             if site.get("siteUrl")
         }
         saved_site_url = connection["selected_site_url"]
-        selected_site_url = (
-            saved_site_url
-            if saved_site_url in available_site_urls
-            else first_site_url(dashboard["sites"])
-        )
+        site_property = current_workspace_gsc_property(user_id)
+        if site_property and site_property in available_site_urls:
+            selected_site_url = site_property
+            dashboard["site_scoped"] = True
+            workspace = get_current_workspace(user_id)
+            if workspace:
+                dashboard["site_name"] = workspace["display_name"] or os.path.basename(
+                    workspace["path"].rstrip(os.sep)
+                ) or workspace["path"]
+        else:
+            selected_site_url = (
+                saved_site_url
+                if saved_site_url in available_site_urls
+                else first_site_url(dashboard["sites"])
+            )
         dashboard["selected_site_url"] = selected_site_url
 
-        if selected_site_url != connection["selected_site_url"]:
+        if selected_site_url != connection["selected_site_url"] and not dashboard["site_scoped"]:
             execute_db(
                 """
                 UPDATE google_search_console_connections
@@ -3711,6 +7129,7 @@ Return a concise summary of the files changed and the page URL/path created.
 
 
 def build_site_manager(user_id):
+    detach_inaccessible_team_directory(user_id)
     directory = get_site_directory(user_id)
     current_path = request.args.get("path", "").strip() if has_request_context() else ""
     preview_path = request.args.get("preview", "").strip() if has_request_context() else ""
@@ -3724,6 +7143,10 @@ def build_site_manager(user_id):
     return {
         "directory": directory,
         "directory_managed_by_env": False,
+        "team_context": current_team_context(user_id),
+        "preview_selection": session.get(PREVIEW_SELECTION_KEY) if has_request_context() else None,
+        "health": get_health_summary(user_id),
+        "client_requests": {"open_count": count_open_client_requests(user_id)},
         "projects": list_site_projects(user_id),
         "backups": list_site_backups(user_id),
         "codex_messages": list_codex_messages(user_id),
@@ -3854,49 +7277,4117 @@ def store_site_directory(user_id, normalized_path):
     )
 
 
+TEAM_PERMISSIONS = ("view", "edit", "publish", "invite", "manage", "billing")
+
+TEAM_ROLE_PRESETS = {
+    "owner": {"view": True, "edit": True, "publish": True, "invite": True, "manage": True, "billing": True},
+    "admin": {"view": True, "edit": True, "publish": True, "invite": True, "manage": True, "billing": True},
+    "editor": {"view": True, "edit": True, "publish": False, "invite": False, "manage": False, "billing": False},
+    "viewer": {"view": True, "edit": False, "publish": False, "invite": False, "manage": False, "billing": False},
+    "client": {"view": True, "edit": False, "publish": False, "invite": False, "manage": False, "billing": False},
+}
+
+TEAM_INVITE_ROLES = ("admin", "editor", "viewer", "client")
+TEAM_MEMBER_ROLES = ("admin", "editor", "viewer", "client", "custom")
+TEAM_INVITE_TTL_SECONDS = 7 * 24 * 3600
+
+
+def parse_team_permissions(raw, fallback_role="viewer"):
+    permissions = dict(TEAM_ROLE_PRESETS.get(fallback_role, TEAM_ROLE_PRESETS["viewer"]))
+    if raw:
+        try:
+            stored = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            stored = {}
+        if isinstance(stored, dict):
+            for key in TEAM_PERMISSIONS:
+                if key in stored:
+                    permissions[key] = bool(stored[key])
+    permissions["view"] = True
+    return permissions
+
+
+def team_permissions_for_role(role):
+    return dict(TEAM_ROLE_PRESETS.get(role, TEAM_ROLE_PRESETS["viewer"]))
+
+
+def get_team(team_id):
+    try:
+        team_id = int(team_id)
+    except (TypeError, ValueError):
+        return None
+    row = query_db("SELECT * FROM teams WHERE id = ?", (team_id,), one=True)
+    return dict(row) if row else None
+
+
+def get_team_membership(team_id, user_id):
+    row = query_db(
+        "SELECT * FROM team_members WHERE team_id = ? AND user_id = ?",
+        (team_id, user_id),
+        one=True,
+    )
+    if not row:
+        return None
+    membership = dict(row)
+    membership["permissions"] = parse_team_permissions(row["permissions"], row["role"])
+    return membership
+
+
+def require_team(team_id):
+    team = get_team(team_id)
+    if not team:
+        raise ValueError(translate("flash.team_not_found"))
+    return team
+
+
+def require_team_membership(team_id, user_id):
+    team = require_team(team_id)
+    membership = get_team_membership(team["id"], user_id)
+    if not membership:
+        raise TeamAccessDenied(translate("flash.not_team_member"))
+    return team, membership
+
+
+def require_team_permission(team_id, user_id, permission):
+    team, membership = require_team_membership(team_id, user_id)
+    if not membership["permissions"].get(permission):
+        raise TeamAccessDenied(translate("flash.team_permission_denied"))
+    return team, membership
+
+
+def get_user_team_ids(user_id):
+    rows = query_db("SELECT team_id FROM team_members WHERE user_id = ?", (user_id,))
+    return {row["team_id"] for row in rows}
+
+
+def serialize_team_member(row):
+    return {
+        "id": row["user_id"],
+        "name": row["name"],
+        "email": row["email"],
+        "role": row["role"],
+        "permissions": parse_team_permissions(row["permissions"], row["role"]),
+        "created_at": row["created_at"],
+    }
+
+
+def get_team_members(team_id):
+    rows = query_db(
+        """
+        SELECT m.user_id, m.role, m.permissions, m.created_at, u.name, u.email
+        FROM team_members m
+        JOIN users u ON u.id = m.user_id
+        WHERE m.team_id = ?
+        ORDER BY m.created_at ASC, m.id ASC
+        """,
+        (team_id,),
+    )
+    return [serialize_team_member(row) for row in rows]
+
+
+def get_pending_team_invites(team_id):
+    rows = query_db(
+        """
+        SELECT i.id, i.email, i.role, i.permissions, i.expires_at, i.created_at,
+               u.name AS invited_by_name, t.name AS team_name
+        FROM team_invites i
+        JOIN teams t ON t.id = i.team_id
+        LEFT JOIN users u ON u.id = i.invited_by
+        WHERE i.team_id = ? AND i.accepted_at IS NULL AND i.expires_at > ?
+        ORDER BY i.created_at DESC, i.id DESC
+        """,
+        (team_id, int(time.time())),
+    )
+    invites = []
+    for row in rows:
+        invite = dict(row)
+        invite["permissions"] = parse_team_permissions(row["permissions"], row["role"])
+        invite["expires_label"] = datetime.fromtimestamp(row["expires_at"]).strftime("%Y-%m-%d %H:%M")
+        invites.append(invite)
+    return invites
+
+
+def get_user_pending_invites(user_id):
+    user = query_db("SELECT email FROM users WHERE id = ?", (user_id,), one=True)
+    if not user:
+        return []
+    rows = query_db(
+        """
+        SELECT i.id, i.team_id, i.email, i.role, i.permissions, i.expires_at, i.created_at,
+               t.name AS team_name, t.description AS team_description,
+               u.name AS invited_by_name
+        FROM team_invites i
+        JOIN teams t ON t.id = i.team_id
+        LEFT JOIN users u ON u.id = i.invited_by
+        WHERE lower(i.email) = lower(?) AND i.accepted_at IS NULL AND i.expires_at > ?
+        ORDER BY i.created_at DESC, i.id DESC
+        """,
+        (user["email"], int(time.time())),
+    )
+    invites = []
+    for row in rows:
+        invite = dict(row)
+        invite["permissions"] = parse_team_permissions(row["permissions"], row["role"])
+        invite["expires_label"] = datetime.fromtimestamp(row["expires_at"]).strftime("%Y-%m-%d %H:%M")
+        invites.append(invite)
+    return invites
+
+
+def serialize_team(team, membership=None):
+    counts = query_db(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM team_members WHERE team_id = ?) AS member_count,
+            (SELECT COUNT(*) FROM website_workspaces WHERE team_id = ?) AS project_count
+        """,
+        (team["id"], team["id"]),
+        one=True,
+    )
+    payload = {
+        "id": team["id"],
+        "name": team["name"],
+        "description": team.get("description") or "",
+        "owner_id": team["owner_id"],
+        "member_count": counts["member_count"],
+        "project_count": counts["project_count"],
+        "created_at": team["created_at"],
+        "updated_at": team["updated_at"],
+    }
+    if membership is not None:
+        payload["my_role"] = membership["role"]
+        payload["my_permissions"] = membership["permissions"]
+    return payload
+
+
+def get_user_teams(user_id):
+    rows = query_db(
+        """
+        SELECT t.*, m.role AS member_role, m.permissions AS member_permissions
+        FROM teams t
+        JOIN team_members m ON m.team_id = t.id AND m.user_id = ?
+        ORDER BY t.name COLLATE NOCASE ASC, t.id ASC
+        """,
+        (user_id,),
+    )
+    teams = []
+    for row in rows:
+        team = dict(row)
+        membership = {
+            "role": row["member_role"],
+            "permissions": parse_team_permissions(row["member_permissions"], row["member_role"]),
+        }
+        teams.append(serialize_team(team, membership))
+    return teams
+
+
+def create_team(owner_id, name, description=""):
+    name = (name or "").strip()
+    if not name:
+        raise ValueError(translate("flash.team_name_required"))
+    team_id = execute_db(
+        "INSERT INTO teams (name, description, owner_id) VALUES (?, ?, ?)",
+        (name[:80], (description or "").strip()[:500], owner_id),
+    )
+    execute_db(
+        "INSERT INTO team_members (team_id, user_id, role, permissions, invited_by) VALUES (?, ?, 'owner', ?, ?)",
+        (team_id, owner_id, json.dumps(team_permissions_for_role("owner")), owner_id),
+    )
+    team = require_team(team_id)
+    return serialize_team(team, {"role": "owner", "permissions": team_permissions_for_role("owner")})
+
+
+def update_team(team_id, actor_id, name=None, description=None):
+    team, _membership = require_team_permission(team_id, actor_id, "manage")
+    updates = {}
+    if name is not None:
+        name = name.strip()
+        if not name:
+            raise ValueError(translate("flash.team_name_required"))
+        updates["name"] = name[:80]
+    if description is not None:
+        updates["description"] = description.strip()[:500]
+    if updates:
+        assignments = ", ".join(f"{column} = ?" for column in updates)
+        execute_db(
+            f"UPDATE teams SET {assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (*updates.values(), team["id"]),
+        )
+    return serialize_team(require_team(team["id"]), get_team_membership(team["id"], actor_id))
+
+
+def delete_team(team_id, actor_id):
+    team = require_team(team_id)
+    if team["owner_id"] != actor_id:
+        raise TeamAccessDenied(translate("flash.team_permission_denied"))
+    execute_db("DELETE FROM website_workspaces WHERE team_id = ?", (team["id"],))
+    execute_db("DELETE FROM team_invites WHERE team_id = ?", (team["id"],))
+    execute_db("DELETE FROM team_members WHERE team_id = ?", (team["id"],))
+    execute_db("DELETE FROM teams WHERE id = ?", (team["id"],))
+
+
+def invite_team_member(team_id, actor_id, email, role="editor"):
+    team, membership = require_team_membership(team_id, actor_id)
+    role = (role or "editor").strip().lower()
+    if role not in TEAM_INVITE_ROLES:
+        role = "editor"
+    needed = "manage" if role == "admin" else "invite"
+    if not membership["permissions"].get(needed):
+        raise TeamAccessDenied(translate("flash.team_permission_denied"))
+    email = (email or "").strip().lower()
+    if not email or "@" not in email:
+        raise ValueError(translate("flash.email_password_required"))
+    existing_user = query_db("SELECT id FROM users WHERE lower(email) = ?", (email,), one=True)
+    if existing_user and get_team_membership(team["id"], existing_user["id"]):
+        raise ValueError(translate("flash.already_member"))
+    execute_db(
+        "DELETE FROM team_invites WHERE team_id = ? AND lower(email) = ? AND accepted_at IS NULL",
+        (team["id"], email),
+    )
+    token = secrets.token_urlsafe(48)
+    now = int(time.time())
+    invite_id = execute_db(
+        """
+        INSERT INTO team_invites (team_id, email, role, permissions, token_hash, invited_by, expires_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            team["id"],
+            email,
+            role,
+            json.dumps(team_permissions_for_role(role)),
+            hashlib.sha256(token.encode("utf-8")).hexdigest(),
+            actor_id,
+            now + TEAM_INVITE_TTL_SECONDS,
+            now,
+        ),
+    )
+    invite = query_db("SELECT * FROM team_invites WHERE id = ?", (invite_id,), one=True)
+    payload = dict(invite)
+    payload["permissions"] = parse_team_permissions(invite["permissions"], invite["role"])
+    return payload, token
+
+
+def send_team_invite_email(team_name, recipient, invite_link):
+    settings = smtp_settings()
+    if not settings["host"] or not settings["from_address"]:
+        raise ValueError("Email is not configured. Set SMTP_HOST and SMTP_FROM.")
+    if bool(settings["username"]) != bool(settings["password"]):
+        raise ValueError("SMTP_USERNAME and SMTP_PASSWORD must be configured together.")
+    message = email.message.EmailMessage()
+    message["Subject"] = f"You are invited to join {team_name} on ONEBoard"
+    message["From"] = settings["from_address"]
+    message["To"] = recipient
+    message.set_content(
+        f"You have been invited to join the team \"{team_name}\" on ONEBoard.\n\n"
+        f"Accept the invitation here:\n{invite_link}\n\n"
+        "This link expires in 7 days. If you do not have an account yet, create one with this email address first."
+    )
+    try:
+        with smtplib.SMTP(settings["host"], settings["port"], timeout=20) as server:
+            if settings["use_tls"]:
+                server.starttls()
+            if settings["username"]:
+                server.login(settings["username"], settings["password"])
+            server.send_message(message)
+    except (OSError, smtplib.SMTPException) as error:
+        raise ValueError("Unable to send the invitation email. Check the SMTP configuration.") from error
+
+
+def get_valid_team_invite(token):
+    if not token:
+        return None
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    row = query_db(
+        """
+        SELECT i.*, t.name AS team_name
+        FROM team_invites i
+        JOIN teams t ON t.id = i.team_id
+        WHERE i.token_hash = ? AND i.accepted_at IS NULL AND i.expires_at > ?
+        """,
+        (token_hash, int(time.time())),
+        one=True,
+    )
+    return dict(row) if row else None
+
+
+def _apply_team_invite(invite, user_id):
+    user = query_db("SELECT id, email FROM users WHERE id = ?", (user_id,), one=True)
+    if not user:
+        raise TeamAccessDenied(translate("flash.login_required"))
+    if user["email"].strip().lower() != invite["email"].strip().lower():
+        raise TeamAccessDenied(translate("flash.invite_email_mismatch"))
+    team = require_team(invite["team_id"])
+    membership = get_team_membership(team["id"], user_id)
+    if not membership:
+        try:
+            execute_db(
+                "INSERT INTO team_members (team_id, user_id, role, permissions, invited_by) VALUES (?, ?, ?, ?, ?)",
+                (
+                    team["id"],
+                    user_id,
+                    invite["role"],
+                    invite["permissions"] or json.dumps(team_permissions_for_role(invite["role"])),
+                    invite["invited_by"],
+                ),
+            )
+        except sqlite3.IntegrityError:
+            pass
+        membership = get_team_membership(team["id"], user_id)
+    execute_db(
+        "UPDATE team_invites SET accepted_at = ? WHERE id = ? AND accepted_at IS NULL",
+        (int(time.time()), invite["id"]),
+    )
+    return serialize_team(team, membership)
+
+
+def accept_team_invite(token, user_id):
+    invite = get_valid_team_invite(token)
+    if not invite:
+        raise ValueError(translate("flash.invite_invalid"))
+    return _apply_team_invite(invite, user_id)
+
+
+def accept_team_invite_by_id(invite_id, user_id):
+    try:
+        invite_id = int(invite_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.invite_invalid"))
+    row = query_db(
+        """
+        SELECT i.*, t.name AS team_name
+        FROM team_invites i
+        JOIN teams t ON t.id = i.team_id
+        WHERE i.id = ? AND i.accepted_at IS NULL AND i.expires_at > ?
+        """,
+        (invite_id, int(time.time())),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.invite_invalid"))
+    return _apply_team_invite(dict(row), user_id)
+
+
+def revoke_team_invite(team_id, actor_id, invite_id):
+    _team, membership = require_team_membership(team_id, actor_id)
+    if not membership["permissions"].get("invite") and not membership["permissions"].get("manage"):
+        raise TeamAccessDenied(translate("flash.team_permission_denied"))
+    try:
+        invite_id = int(invite_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.invite_invalid"))
+    row = query_db(
+        "SELECT id FROM team_invites WHERE id = ? AND team_id = ? AND accepted_at IS NULL",
+        (invite_id, team_id),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.invite_invalid"))
+    execute_db("DELETE FROM team_invites WHERE id = ?", (invite_id,))
+
+
+def _matching_team_preset(permissions):
+    for name, preset in TEAM_ROLE_PRESETS.items():
+        if name == "owner":
+            continue
+        if all(bool(permissions.get(key)) == value for key, value in preset.items()):
+            return name
+    return "custom"
+
+
+def update_team_member(team_id, actor_id, target_user_id, role=None, permissions=None):
+    team, _membership = require_team_permission(team_id, actor_id, "manage")
+    try:
+        target_user_id = int(target_user_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.team_member_not_found"))
+    target = get_team_membership(team["id"], target_user_id)
+    if not target:
+        raise ValueError(translate("flash.team_member_not_found"))
+    if target["role"] == "owner" or target_user_id == team["owner_id"]:
+        raise TeamAccessDenied(translate("flash.cannot_modify_owner"))
+    if role is not None:
+        role = role.strip().lower()
+        if role == "owner":
+            raise TeamAccessDenied(translate("flash.cannot_modify_owner"))
+        if role not in TEAM_MEMBER_ROLES:
+            raise ValueError(translate("flash.team_member_not_found"))
+    else:
+        role = target["role"]
+    merged = dict(team_permissions_for_role(role)) if role != "custom" else dict(target["permissions"])
+    if role == "custom":
+        merged = dict(target["permissions"])
+    if permissions is not None:
+        if not isinstance(permissions, dict):
+            raise ValueError(translate("flash.team_member_not_found"))
+        for key in TEAM_PERMISSIONS:
+            if key in permissions:
+                merged[key] = bool(permissions[key])
+        merged["view"] = True
+        role = _matching_team_preset(merged)
+    execute_db(
+        "UPDATE team_members SET role = ?, permissions = ? WHERE team_id = ? AND user_id = ?",
+        (role, json.dumps(merged), team["id"], target_user_id),
+    )
+    return get_team_members(team["id"])
+
+
+def remove_team_member(team_id, actor_id, target_user_id):
+    team, _membership = require_team_permission(team_id, actor_id, "manage")
+    try:
+        target_user_id = int(target_user_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.team_member_not_found"))
+    target = get_team_membership(team["id"], target_user_id)
+    if not target:
+        raise ValueError(translate("flash.team_member_not_found"))
+    if target["role"] == "owner" or target_user_id == team["owner_id"]:
+        raise TeamAccessDenied(translate("flash.cannot_modify_owner"))
+    execute_db(
+        "DELETE FROM team_members WHERE team_id = ? AND user_id = ?",
+        (team["id"], target_user_id),
+    )
+    detach_inaccessible_team_directory(target_user_id)
+    return get_team_members(team["id"])
+
+
+def leave_team(team_id, user_id):
+    team, membership = require_team_membership(team_id, user_id)
+    if membership["role"] == "owner" or team["owner_id"] == user_id:
+        raise ValueError(translate("flash.owner_transfer_required"))
+    execute_db(
+        "DELETE FROM team_members WHERE team_id = ? AND user_id = ?",
+        (team["id"], user_id),
+    )
+    detach_inaccessible_team_directory(user_id)
+
+
+def transfer_team_ownership(team_id, actor_id, target_user_id):
+    team = require_team(team_id)
+    if team["owner_id"] != actor_id:
+        raise TeamAccessDenied(translate("flash.team_permission_denied"))
+    try:
+        target_user_id = int(target_user_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.team_member_not_found"))
+    if target_user_id == actor_id:
+        raise ValueError(translate("flash.team_member_not_found"))
+    target = get_team_membership(team["id"], target_user_id)
+    if not target:
+        raise ValueError(translate("flash.team_member_not_found"))
+    execute_db(
+        "UPDATE team_members SET role = 'admin', permissions = ? WHERE team_id = ? AND user_id = ?",
+        (json.dumps(team_permissions_for_role("admin")), team["id"], actor_id),
+    )
+    execute_db(
+        "UPDATE team_members SET role = 'owner', permissions = ? WHERE team_id = ? AND user_id = ?",
+        (json.dumps(team_permissions_for_role("owner")), team["id"], target_user_id),
+    )
+    execute_db(
+        "UPDATE teams SET owner_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (target_user_id, team["id"]),
+    )
+    return get_team_members(team["id"])
+
+
+def find_team_projects_by_path(normalized_path):
+    return query_db(
+        """
+        SELECT w.*, t.name AS team_name
+        FROM website_workspaces w
+        JOIN teams t ON t.id = w.team_id
+        WHERE w.team_id IS NOT NULL AND w.path = ?
+        """,
+        (normalized_path,),
+    )
+
+
+def current_team_context(user_id):
+    """Return the team context for the user's current directory, if any."""
+    directory = get_site_directory(user_id)
+    if not directory:
+        return None
+    rows = find_team_projects_by_path(os.path.realpath(directory["path"]))
+    if not rows:
+        return None
+    membership = get_team_membership(rows[0]["team_id"], user_id)
+    if not membership or not membership["permissions"].get("view"):
+        return None
+    team = require_team(rows[0]["team_id"])
+    return {
+        "team": {"id": team["id"], "name": team["name"]},
+        "project_id": rows[0]["id"],
+        "role": membership["role"],
+        "permissions": membership["permissions"],
+    }
+
+
+def require_project_permission(user_id, permission):
+    """Enforce the team permission for the user's current directory.
+
+    Personal folders are always allowed. Folders shared with a team require
+    membership plus the given granular permission.
+    """
+    directory = get_site_directory(user_id)
+    if not directory:
+        return None
+    rows = find_team_projects_by_path(os.path.realpath(directory["path"]))
+    if not rows:
+        return None
+    membership = get_team_membership(rows[0]["team_id"], user_id)
+    if not membership or not membership["permissions"].get("view"):
+        raise TeamAccessDenied(translate("flash.team_path_forbidden"))
+    if not membership["permissions"].get(permission):
+        raise TeamAccessDenied(translate("flash.team_permission_denied"))
+    return {
+        "team_id": rows[0]["team_id"],
+        "role": membership["role"],
+        "permissions": membership["permissions"],
+    }
+
+
+def team_scope_user_ids(user_id):
+    """User ids whose chat/history/backups are visible in the current folder."""
+    directory = get_site_directory(user_id)
+    if not directory:
+        return [user_id]
+    rows = find_team_projects_by_path(os.path.realpath(directory["path"]))
+    if not rows:
+        return [user_id]
+    membership = get_team_membership(rows[0]["team_id"], user_id)
+    if not membership or not membership["permissions"].get("view"):
+        return []
+    member_rows = query_db(
+        "SELECT user_id FROM team_members WHERE team_id = ?", (rows[0]["team_id"],)
+    )
+    return [row["user_id"] for row in member_rows] or [user_id]
+
+
+def detach_inaccessible_team_directory(user_id):
+    """Forget the current folder when it is a team project without access."""
+    directory = get_site_directory(user_id)
+    if not directory:
+        return False
+    rows = find_team_projects_by_path(os.path.realpath(directory["path"]))
+    if not rows:
+        return False
+    membership = get_team_membership(rows[0]["team_id"], user_id)
+    if membership and membership["permissions"].get("view"):
+        return False
+    execute_db("DELETE FROM website_directories WHERE user_id = ?", (user_id,))
+    return True
+
+
+def set_current_site_directory(user_id, normalized_path):
+    execute_db(
+        """
+        INSERT INTO website_directories (user_id, path)
+        VALUES (?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            path = excluded.path,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (user_id, normalized_path),
+    )
+
+
+def connect_site_project(user_id, project_id=None, path=None):
+    """Open a personal or team project by id, or connect a folder path."""
+    if project_id is not None:
+        try:
+            project_id = int(str(project_id).strip())
+        except (TypeError, ValueError):
+            raise ValueError(translate("flash.project_not_found"))
+        row = query_db(
+            """
+            SELECT w.*, t.name AS team_name
+            FROM website_workspaces w
+            LEFT JOIN teams t ON t.id = w.team_id
+            WHERE w.id = ?
+              AND (
+                (w.team_id IS NULL AND w.user_id = ?)
+                OR (w.team_id IS NOT NULL AND w.team_id IN (SELECT team_id FROM team_members WHERE user_id = ?))
+              )
+            """,
+            (project_id, user_id, user_id),
+            one=True,
+        )
+        if not row:
+            raise ValueError(translate("flash.project_not_found"))
+        if row["team_id"] is not None:
+            membership = get_team_membership(row["team_id"], user_id)
+            if not membership or not membership["permissions"].get("view"):
+                raise TeamAccessDenied(translate("flash.team_path_forbidden"))
+            normalized_path = os.path.realpath(row["path"])
+            validate_site_directory_selection(normalized_path)
+            if not os.path.isdir(normalized_path):
+                raise ValueError(translate("flash.site_path_missing"))
+            set_current_site_directory(user_id, normalized_path)
+            execute_db(
+                "UPDATE website_workspaces SET last_opened_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (row["id"],),
+            )
+            return
+        connect_site_directory(user_id, row["path"])
+        return
+
+    cleaned_path = clean_manual_directory_path(path or "")
+    if not cleaned_path:
+        ensure_default_site_directory(user_id)
+        return
+    normalized_path = os.path.realpath(os.path.abspath(os.path.expanduser(cleaned_path)))
+    validate_site_directory_selection(normalized_path)
+    shared = find_team_projects_by_path(normalized_path)
+    member_teams = get_user_team_ids(user_id)
+    if any(row["team_id"] in member_teams for row in shared):
+        membership = get_team_membership(
+            next(row["team_id"] for row in shared if row["team_id"] in member_teams), user_id
+        )
+        if not membership or not membership["permissions"].get("view"):
+            raise TeamAccessDenied(translate("flash.team_path_forbidden"))
+        if not os.path.isdir(normalized_path):
+            raise ValueError(translate("flash.site_path_missing"))
+        set_current_site_directory(user_id, normalized_path)
+        execute_db(
+            "UPDATE website_workspaces SET last_opened_at = CURRENT_TIMESTAMP WHERE team_id IS NOT NULL AND path = ?",
+            (normalized_path,),
+        )
+        return
+    if shared:
+        raise TeamAccessDenied(translate("flash.team_path_forbidden"))
+    connect_site_directory(user_id, cleaned_path)
+
+
+def add_team_project(team_id, actor_id, project_id=None, path=None):
+    _team, _membership = require_team_permission(team_id, actor_id, "manage")
+    team_id = int(team_id)
+    if project_id is not None:
+        try:
+            project_id = int(str(project_id).strip())
+        except (TypeError, ValueError):
+            raise ValueError(translate("flash.project_not_found"))
+        row = query_db(
+            "SELECT id, path FROM website_workspaces WHERE id = ? AND user_id = ? AND team_id IS NULL",
+            (project_id, actor_id),
+            one=True,
+        )
+        if not row:
+            raise ValueError(translate("flash.project_not_found"))
+        normalized_path = os.path.realpath(row["path"])
+        source_id = row["id"]
+    else:
+        cleaned_path = clean_manual_directory_path(path or "")
+        if not cleaned_path:
+            raise ValueError(translate("flash.site_path_required"))
+        normalized_path = os.path.realpath(os.path.abspath(os.path.expanduser(cleaned_path)))
+        source_id = None
+    validate_site_directory_selection(normalized_path)
+    if not os.path.isdir(normalized_path):
+        raise ValueError(translate("flash.site_path_not_directory"))
+    shared = find_team_projects_by_path(normalized_path)
+    same = next((row for row in shared if row["team_id"] == team_id), None)
+    if same:
+        execute_db(
+            "UPDATE website_workspaces SET last_opened_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (same["id"],),
+        )
+        return format_site_project(same, None, {"scope": "team", "team_id": team_id, "team_name": same["team_name"]})
+    if shared:
+        raise TeamAccessDenied(translate("flash.team_project_elsewhere"))
+    if source_id is not None:
+        execute_db(
+            "UPDATE website_workspaces SET team_id = ?, last_opened_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (team_id, source_id),
+        )
+        row_id = source_id
+    else:
+        try:
+            row_id = execute_db(
+                "INSERT INTO website_workspaces (user_id, path, team_id, last_opened_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+                (actor_id, normalized_path, team_id),
+            )
+        except sqlite3.IntegrityError as error:
+            raise TeamAccessDenied(translate("flash.team_project_elsewhere")) from error
+    row = query_db(
+        """
+        SELECT w.*, t.name AS team_name
+        FROM website_workspaces w
+        JOIN teams t ON t.id = w.team_id
+        WHERE w.id = ?
+        """,
+        (row_id,),
+        one=True,
+    )
+    return format_site_project(dict(row), None, {"scope": "team", "team_id": team_id, "team_name": row["team_name"]})
+
+
+def remove_team_project(team_id, actor_id, project_id):
+    team, _membership = require_team_permission(team_id, actor_id, "manage")
+    try:
+        project_id = int(str(project_id).strip())
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.project_not_found"))
+    row = query_db(
+        "SELECT id, path FROM website_workspaces WHERE id = ? AND team_id = ?",
+        (project_id, team["id"]),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.project_not_found"))
+    execute_db("DELETE FROM website_workspaces WHERE id = ?", (project_id,))
+    directory = get_site_directory(actor_id)
+    if directory and os.path.realpath(directory["path"]) == os.path.realpath(row["path"]):
+        execute_db("DELETE FROM website_directories WHERE user_id = ?", (actor_id,))
+
+
+def get_team_projects(team_id):
+    rows = query_db(
+        """
+        SELECT w.*, t.name AS team_name
+        FROM website_workspaces w
+        JOIN teams t ON t.id = w.team_id
+        WHERE w.team_id = ?
+        ORDER BY w.last_opened_at DESC, w.id DESC
+        """,
+        (team_id,),
+    )
+    return [format_site_project(dict(row), None, {"scope": "team", "team_id": row["team_id"], "team_name": row["team_name"]}) for row in rows]
+
+
+def format_site_project(row, current, extra=None):
+    path = row["path"]
+    name = os.path.basename(path.rstrip(os.sep)) or path
+    project = {
+        "id": row["id"],
+        "path": path,
+        "name": name,
+        "display_name": row.get("display_name") or name,
+        "client_name": row.get("client_name") or "",
+        "has_brand": bool(row.get("brand_json")),
+        "is_current": current is not None and os.path.realpath(path) == current,
+        "exists": os.path.isdir(path),
+        "last_opened_at": row["last_opened_at"],
+        "scope": "personal",
+        "team_id": None,
+        "team_name": None,
+        "permissions": dict(TEAM_ROLE_PRESETS["owner"]),
+    }
+    if extra:
+        project.update(extra)
+    return project
+
+
 def list_site_projects(user_id):
     directory = get_site_directory(user_id)
     current = os.path.realpath(directory["path"]) if directory else None
     rows = query_db(
         """
-        SELECT id, path, last_opened_at
-        FROM website_workspaces
-        WHERE user_id = ?
-        ORDER BY last_opened_at DESC, id DESC
+        SELECT w.id, w.path, w.last_opened_at, w.team_id, t.name AS team_name,
+               w.display_name, w.client_name, w.brand_json,
+               m.role AS member_role, m.permissions AS member_permissions
+        FROM website_workspaces w
+        LEFT JOIN teams t ON t.id = w.team_id
+        LEFT JOIN team_members m ON m.team_id = w.team_id AND m.user_id = ?
+        WHERE (w.team_id IS NULL AND w.user_id = ?)
+           OR (w.team_id IS NOT NULL AND m.user_id IS NOT NULL)
+        ORDER BY w.last_opened_at DESC, w.id DESC
         """,
-        (user_id,),
+        (user_id, user_id),
     )
     projects = []
     for row in rows:
-        path = row["path"]
-        projects.append(
-            {
-                "id": row["id"],
-                "path": path,
-                "name": os.path.basename(path.rstrip(os.sep)) or path,
-                "is_current": current is not None and os.path.realpath(path) == current,
-                "exists": os.path.isdir(path),
-                "last_opened_at": row["last_opened_at"],
+        if row["team_id"] is not None:
+            permissions = parse_team_permissions(row["member_permissions"], row["member_role"])
+            if not permissions.get("view"):
+                continue
+            extra = {
+                "scope": "team",
+                "team_id": row["team_id"],
+                "team_name": row["team_name"],
+                "permissions": permissions,
             }
-        )
+        else:
+            extra = None
+        projects.append(format_site_project(dict(row), current, extra))
     return projects
 
 
 def remove_site_project(user_id, project_id):
     row = query_db(
-        "SELECT id, path FROM website_workspaces WHERE id = ? AND user_id = ?",
-        (project_id, user_id),
+        """
+        SELECT w.id, w.path, w.team_id
+        FROM website_workspaces w
+        LEFT JOIN team_members m ON m.team_id = w.team_id AND m.user_id = ?
+        WHERE w.id = ?
+          AND ((w.team_id IS NULL AND w.user_id = ?) OR (w.team_id IS NOT NULL AND m.user_id IS NOT NULL))
+        """,
+        (user_id, project_id, user_id),
         one=True,
     )
     if not row:
         raise ValueError(translate("flash.project_not_found"))
-    execute_db(
-        "DELETE FROM website_workspaces WHERE id = ? AND user_id = ?",
-        (project_id, user_id),
-    )
+    if row["team_id"] is not None:
+        _team, membership = require_team_membership(row["team_id"], user_id)
+        if not membership["permissions"].get("manage"):
+            raise TeamAccessDenied(translate("flash.team_permission_denied"))
+        execute_db("DELETE FROM website_workspaces WHERE id = ?", (row["id"],))
+    else:
+        execute_db(
+            "DELETE FROM website_workspaces WHERE id = ? AND user_id = ?",
+            (project_id, user_id),
+        )
     directory = get_site_directory(user_id)
     if directory and os.path.realpath(directory["path"]) == os.path.realpath(row["path"]):
         execute_db("DELETE FROM website_directories WHERE user_id = ?", (user_id,))
+
+
+BRAND_TEXT_LIMITS = {
+    "business_name": 120,
+    "tagline": 200,
+    "services": 2000,
+    "audience": 1000,
+    "tone": 500,
+    "phone": 60,
+    "email": 120,
+    "address": 300,
+    "website": 200,
+    "notes": 2000,
+}
+BRAND_COLOR_KEYS = ("primary", "secondary", "accent")
+BRAND_FONT_KEYS = ("headings", "body")
+
+
+def default_site_brand():
+    return {
+        "business_name": "",
+        "tagline": "",
+        "services": "",
+        "audience": "",
+        "tone": "",
+        "colors": {key: "" for key in BRAND_COLOR_KEYS},
+        "fonts": {key: "" for key in BRAND_FONT_KEYS},
+        "phone": "",
+        "email": "",
+        "address": "",
+        "website": "",
+        "notes": "",
+        "logo": "",
+    }
+
+
+def parse_site_brand(raw):
+    brand = default_site_brand()
+    if not raw:
+        return brand
+    try:
+        stored = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return brand
+    if not isinstance(stored, dict):
+        return brand
+    for key, limit in BRAND_TEXT_LIMITS.items():
+        value = stored.get(key)
+        if isinstance(value, str):
+            brand[key] = value.strip()[:limit]
+    colors = stored.get("colors")
+    if isinstance(colors, dict):
+        for key in BRAND_COLOR_KEYS:
+            if isinstance(colors.get(key), str):
+                brand["colors"][key] = colors[key].strip()[:32]
+    fonts = stored.get("fonts")
+    if isinstance(fonts, dict):
+        for key in BRAND_FONT_KEYS:
+            if isinstance(fonts.get(key), str):
+                brand["fonts"][key] = fonts[key].strip()[:80]
+    logo = stored.get("logo")
+    if isinstance(logo, str):
+        brand["logo"] = logo.strip()[:128]
+    return brand
+
+
+def clean_site_brand_update(payload, existing):
+    if not isinstance(payload, dict):
+        raise ValueError(translate("flash.site_brand_invalid"))
+    brand = parse_site_brand(json.dumps(existing))
+    for key, limit in BRAND_TEXT_LIMITS.items():
+        if key in payload and payload[key] is not None:
+            brand[key] = str(payload[key]).strip()[:limit]
+    colors = payload.get("colors")
+    if isinstance(colors, dict):
+        for key in BRAND_COLOR_KEYS:
+            if key in colors and colors[key] is not None:
+                brand["colors"][key] = str(colors[key]).strip()[:32]
+    fonts = payload.get("fonts")
+    if isinstance(fonts, dict):
+        for key in BRAND_FONT_KEYS:
+            if key in fonts and fonts[key] is not None:
+                brand["fonts"][key] = str(fonts[key]).strip()[:80]
+    return brand
+
+
+def serialize_site_brand(brand):
+    payload = parse_site_brand(json.dumps(brand))
+    logo = payload.get("logo") or ""
+    payload["logo_url"] = f"/uploads/brand-logos/{logo}" if logo else ""
+    return payload
+
+
+def brand_prompt_block(brand):
+    brand = parse_site_brand(json.dumps(brand or {}))
+    lines = []
+    business = brand["business_name"]
+    if business:
+        headline = business
+        if brand["tagline"]:
+            headline += f" — {brand['tagline']}"
+        lines.append(f"- Business: {headline}")
+    if brand["services"]:
+        lines.append(f"- Services and products: {brand['services']}")
+    if brand["audience"]:
+        lines.append(f"- Target audience: {brand['audience']}")
+    if brand["tone"]:
+        lines.append(f"- Tone of voice: {brand['tone']}")
+    colors = [f"{key} {brand['colors'][key]}" for key in BRAND_COLOR_KEYS if brand["colors"][key]]
+    if colors:
+        lines.append(f"- Brand colors: {', '.join(colors)}")
+    fonts = [f"{key} {brand['fonts'][key]}" for key in BRAND_FONT_KEYS if brand["fonts"][key]]
+    if fonts:
+        lines.append(f"- Typography: {', '.join(fonts)}")
+    contact = [brand[key] for key in ("phone", "email", "address", "website") if brand[key]]
+    if contact:
+        lines.append(f"- Contact details: {'; '.join(contact)}")
+    if brand["notes"]:
+        lines.append(f"- Notes: {brand['notes']}")
+    if not lines:
+        return ""
+    return "Brand context for this website (apply it to copy, pages, and creatives):\n" + "\n".join(lines)
+
+
+def brand_image_style_suffix(brand):
+    brand = parse_site_brand(json.dumps(brand or {}))
+    parts = []
+    colors = [brand["colors"][key] for key in BRAND_COLOR_KEYS if brand["colors"][key]]
+    if colors:
+        parts.append(f"brand colors {', '.join(colors)}")
+    if brand["tone"]:
+        parts.append(f"{brand['tone']} mood")
+    if brand["business_name"]:
+        parts.append(f"for {brand['business_name']}")
+    if not parts:
+        return ""
+    return "Brand style: " + ", ".join(parts) + "."
+
+
+def get_workspace_for_path(user_id, real_path):
+    return query_db(
+        """
+        SELECT w.*
+        FROM website_workspaces w
+        LEFT JOIN team_members m ON m.team_id = w.team_id AND m.user_id = ?
+        WHERE w.path = ?
+          AND ((w.team_id IS NULL AND w.user_id = ?) OR (w.team_id IS NOT NULL AND m.user_id IS NOT NULL))
+        ORDER BY CASE WHEN w.team_id IS NULL THEN 1 ELSE 0 END, w.id ASC
+        """,
+        (user_id, real_path, user_id),
+        one=True,
+    )
+
+
+def get_current_workspace(user_id):
+    directory = get_site_directory(user_id)
+    if not directory:
+        return None
+    return get_workspace_for_path(user_id, os.path.realpath(directory["path"]))
+
+
+def workspace_visible_to_user(workspace_id, user_id):
+    try:
+        workspace_id = int(workspace_id)
+    except (TypeError, ValueError):
+        return False
+    row = query_db(
+        """
+        SELECT w.id
+        FROM website_workspaces w
+        LEFT JOIN team_members m ON m.team_id = w.team_id AND m.user_id = ?
+        WHERE w.id = ?
+          AND ((w.team_id IS NULL AND w.user_id = ?) OR (w.team_id IS NOT NULL AND m.user_id IS NOT NULL))
+        """,
+        (user_id, workspace_id, user_id),
+        one=True,
+    )
+    return row is not None
+
+
+def current_workspace_brand(user_id):
+    workspace = get_current_workspace(user_id)
+    if not workspace:
+        return default_site_brand()
+    return parse_site_brand(workspace["brand_json"])
+
+
+def current_workspace_brand_text(user_id):
+    return brand_prompt_block(current_workspace_brand(user_id))
+
+
+def current_workspace_gsc_property(user_id):
+    workspace = get_current_workspace(user_id)
+    if not workspace:
+        return ""
+    return workspace["gsc_property"] or ""
+
+
+INTELLIGENCE_MAX_PAGES = 10
+INTELLIGENCE_MAX_PAGE_CHARS = 1200
+INTELLIGENCE_MAX_PROMPT_CHARS = 6000
+
+
+class _SiteTextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.chunks = []
+        self._skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style", "noscript"):
+            self._skip += 1
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style", "noscript") and self._skip:
+            self._skip -= 1
+
+    def handle_data(self, data):
+        if self._skip:
+            return
+        text = (data or "").strip()
+        if text:
+            self.chunks.append(text)
+
+
+def extract_visible_page_text(page_text, max_chars=INTELLIGENCE_MAX_PAGE_CHARS):
+    extractor = _SiteTextExtractor()
+    try:
+        extractor.feed(page_text or "")
+        extractor.close()
+    except (ValueError, TypeError):
+        pass
+    joined = " ".join(extractor.chunks)
+    joined = re.sub(r"\s+", " ", joined).strip()
+    if len(joined) > max_chars:
+        joined = joined[:max_chars].rsplit(" ", 1)[0]
+    return joined
+
+
+def extract_meta_description(page_text):
+    match = re.search(
+        r'<meta\s+[^>]*name=["\']description["\'][^>]*content=["\']([^"\']+)["\']',
+        page_text or "",
+        re.IGNORECASE,
+    )
+    if match:
+        return match.group(1).strip()[:300]
+    match = re.search(
+        r'<meta\s+[^>]*content=["\']([^"\']+)["\'][^>]*name=["\']description["\']',
+        page_text or "",
+        re.IGNORECASE,
+    )
+    return match.group(1).strip()[:300] if match else ""
+
+
+def summarize_site_pages(real_path, max_pages=INTELLIGENCE_MAX_PAGES):
+    try:
+        manifest = build_workspace_manifest(real_path)
+    except (ValueError, OSError):
+        return []
+    pages = sorted(
+        path
+        for path, item in manifest.items()
+        if item.get("kind") == "file" and posixpath.splitext(path)[1].lower() in (".htm", ".html")
+    )
+
+    def _page_priority(path):
+        name = posixpath.basename(path).lower()
+        if name in ("index.html", "index.htm"):
+            return (0, path)
+        return (1, path)
+
+    summaries = []
+    for relpath in sorted(pages, key=_page_priority)[:max_pages]:
+        absolute_path = os.path.join(real_path, *relpath.split("/"))
+        try:
+            if os.path.getsize(absolute_path) > HEALTH_MAX_PARSE_BYTES:
+                continue
+            with open(absolute_path, "r", encoding="utf-8", errors="replace") as handle:
+                page_text = handle.read()
+        except OSError:
+            continue
+        inspector = inspect_site_page_text(page_text)
+        try:
+            updated_at = datetime.fromtimestamp(os.path.getmtime(absolute_path)).strftime("%Y-%m-%d")
+        except OSError:
+            updated_at = ""
+        summaries.append(
+            {
+                "path": relpath,
+                "title": (inspector.title or "").strip()[:160],
+                "heading": (inspector.h1 or "").strip()[:160],
+                "description": extract_meta_description(page_text),
+                "excerpt": extract_visible_page_text(page_text),
+                "updated": updated_at,
+            }
+        )
+    return summaries
+
+
+def build_site_intelligence(user_id):
+    """Combined context shared by every AI feature: brand, pages, health, calendar.
+
+    This is the glue that makes the whole app work as one: the site analysis,
+    the AI assistant, and the social suggestions all read the same snapshot.
+    """
+    directory = get_site_directory(user_id)
+    if not directory:
+        return {"has_site": False}
+    real_path = os.path.realpath(directory["path"])
+    workspace = get_current_workspace(user_id)
+    brand = parse_site_brand(workspace["brand_json"]) if workspace else default_site_brand()
+    findings = query_db(
+        "SELECT check_type, severity, page, detail FROM site_findings"
+        " WHERE directory_path = ? AND status = 'open'"
+        " ORDER BY CASE WHEN severity = 'error' THEN 0 ELSE 1 END, page ASC LIMIT 25",
+        (real_path,),
+    )
+    try:
+        events = [event for event in list_calendar_events(user_id) if event.get("status") in ("scheduled", "active")][:5]
+    except (ValueError, sqlite3.OperationalError):
+        events = []
+    try:
+        history = list_update_history(user_id)[:5]
+    except (ValueError, sqlite3.OperationalError):
+        history = []
+    return {
+        "has_site": True,
+        "site_name": (workspace["display_name"] if workspace else "") or os.path.basename(real_path.rstrip(os.sep)),
+        "client_name": workspace["client_name"] if workspace else "",
+        "brand": serialize_site_brand(brand),
+        "pages": summarize_site_pages(real_path),
+        "open_issues": [
+            {
+                "check": row["check_type"],
+                "severity": row["severity"],
+                "page": row["page"],
+                "detail": (row["detail"] or "")[:160],
+            }
+            for row in findings
+        ],
+        "open_issue_count": len(findings),
+        "upcoming_events": [
+            {"title": event.get("title"), "kind": event.get("kind"), "starts_on": event.get("starts_on")}
+            for event in events
+        ],
+        "recent_updates": [
+            {"summary": str(item.get("summary") or "")[:160], "status": item.get("status")}
+            for item in history
+            if str(item.get("summary") or "").strip()
+        ],
+    }
+
+
+def site_intelligence_prompt_block(user_id, max_chars=INTELLIGENCE_MAX_PROMPT_CHARS):
+    intelligence = build_site_intelligence(user_id)
+    if not intelligence.get("has_site"):
+        return ""
+    lines = [f"Website under management: {intelligence.get('site_name') or 'connected site'}."]
+    brand_text = brand_prompt_block(intelligence.get("brand") or {})
+    if brand_text:
+        lines.append(brand_text)
+    pages = intelligence.get("pages") or []
+    if pages:
+        lines.append("Site pages (use their real content for copy, posts, and fixes):")
+        for page in pages:
+            label = page["title"] or page["heading"] or page["path"]
+            lines.append(f"- {page['path']}: {label}")
+            if page.get("description"):
+                lines.append(f"  Meta: {page['description']}")
+            if page.get("excerpt"):
+                lines.append(f"  Content: {page['excerpt']}")
+    issues = intelligence.get("open_issues") or []
+    if issues:
+        lines.append(f"Open site issues ({len(issues)} shown):")
+        for issue in issues[:12]:
+            lines.append(f"- [{issue['severity']}] {issue['check']} on {issue['page']}: {issue['detail']}")
+    events = intelligence.get("upcoming_events") or []
+    if events:
+        lines.append("Upcoming calendar events:")
+        for event in events:
+            lines.append(f"- {event.get('kind')}: {event.get('title')} ({event.get('starts_on') or 'no date'})")
+    block = "\n".join(lines)
+    if len(block) > max_chars:
+        block = block[:max_chars].rsplit("\n", 1)[0]
+    return block
+
+
+def serialize_site_settings(user_id, workspace):
+    brand = parse_site_brand(workspace["brand_json"])
+    try:
+        require_project_permission(user_id, "edit")
+        can_edit = True
+    except TeamAccessDenied:
+        can_edit = False
+    return {
+        "id": workspace["id"],
+        "path": workspace["path"],
+        "name": os.path.basename(workspace["path"].rstrip(os.sep)) or workspace["path"],
+        "display_name": workspace["display_name"] or "",
+        "client_name": workspace["client_name"] or "",
+        "scope": "team" if workspace["team_id"] is not None else "personal",
+        "team_id": workspace["team_id"],
+        "brand": serialize_site_brand(brand),
+        "gsc_property": workspace["gsc_property"] or "",
+        "images": list_generated_images(user_id, workspace_id=workspace["id"]),
+        "can_edit": can_edit,
+    }
+
+
+def get_site_settings(user_id):
+    workspace = get_current_workspace(user_id)
+    if not workspace:
+        raise ValueError(translate("flash.site_directory_unmapped"))
+    require_project_permission(user_id, "view")
+    return serialize_site_settings(user_id, dict(workspace))
+
+
+def update_site_settings(user_id, display_name=None, client_name=None, brand=None, gsc_property=None):
+    workspace = get_current_workspace(user_id)
+    if not workspace:
+        raise ValueError(translate("flash.site_directory_unmapped"))
+    require_project_permission(user_id, "edit")
+    updates = {}
+    if display_name is not None:
+        updates["display_name"] = str(display_name).strip()[:80]
+    if client_name is not None:
+        updates["client_name"] = str(client_name).strip()[:80]
+    if gsc_property is not None:
+        updates["gsc_property"] = str(gsc_property).strip()[:300]
+    if brand is not None:
+        merged = clean_site_brand_update(brand, parse_site_brand(workspace["brand_json"]))
+        updates["brand_json"] = json.dumps(merged)
+    if updates:
+        assignments = ", ".join(f"{column} = ?" for column in updates)
+        execute_db(
+            f"UPDATE website_workspaces SET {assignments} WHERE id = ?",
+            (*updates.values(), workspace["id"]),
+        )
+    return get_site_settings(user_id)
+
+
+def brand_logo_directory():
+    directory = os.path.join(UPLOAD_DIR, "brand-logos")
+    os.makedirs(directory, exist_ok=True)
+    return directory
+
+
+def save_site_logo(user_id, upload):
+    workspace = get_current_workspace(user_id)
+    if not workspace:
+        raise ValueError(translate("flash.site_directory_unmapped"))
+    require_project_permission(user_id, "edit")
+    filename = (upload.filename or "") if upload else ""
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if extension not in {"png", "jpg", "jpeg", "webp", "gif"}:
+        raise ValueError(translate("flash.avatar_invalid"))
+    if not upload or not uploaded_image_matches_extension(upload, extension):
+        raise ValueError(translate("flash.avatar_invalid"))
+    directory = brand_logo_directory()
+    logo_filename = f"site-{workspace['id']}-{secrets.token_hex(8)}.{extension}"
+    upload.save(os.path.join(directory, logo_filename))
+    brand = parse_site_brand(workspace["brand_json"])
+    previous = brand.get("logo") or ""
+    if previous and previous != logo_filename:
+        try:
+            os.remove(os.path.join(directory, posixpath.basename(previous)))
+        except OSError:
+            pass
+    brand["logo"] = logo_filename
+    execute_db(
+        "UPDATE website_workspaces SET brand_json = ? WHERE id = ?",
+        (json.dumps(brand), workspace["id"]),
+    )
+    return get_site_settings(user_id)
+
+
+def brand_logo_visible_to_user(filename, user_id):
+    safe_name = posixpath.basename(filename or "")
+    if not safe_name.startswith("site-"):
+        return False
+    try:
+        workspace_id = int(safe_name.split("-", 2)[1])
+    except (IndexError, TypeError, ValueError):
+        return False
+    return workspace_visible_to_user(workspace_id, user_id)
+
+
+def record_generated_image(user_id, filename, prompt=""):
+    workspace = get_current_workspace(user_id)
+    try:
+        execute_db(
+            "INSERT INTO site_images (user_id, workspace_id, filename, prompt) VALUES (?, ?, ?, ?)",
+            (user_id, workspace["id"] if workspace else None, filename, (prompt or "")[:500]),
+        )
+    except sqlite3.IntegrityError:
+        pass
+
+
+def site_image_visible_to_user(filename, user_id):
+    safe_name = posixpath.basename(filename or "")
+    if safe_name.startswith(f"user-{user_id}-"):
+        return True
+    row = query_db(
+        "SELECT workspace_id FROM site_images WHERE filename = ?", (safe_name,), one=True
+    )
+    if not row or not row["workspace_id"]:
+        return False
+    return workspace_visible_to_user(row["workspace_id"], user_id)
+
+
+PREVIEW_SELECTION_KEY = "preview_selection"
+PREVIEW_IMAGE_EXTENSIONS = {".gif", ".ico", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
+
+
+def clean_preview_selection(user_id, payload):
+    payload = payload or {}
+    page = str(payload.get("page") or "").replace("\\", "/").strip().strip("/")[:300]
+    selector = str(payload.get("selector") or "").strip()[:500]
+    if not page or not selector:
+        raise ValueError(translate("site.file_missing"))
+    try:
+        absolute_path = resolve_site_file(user_id, page)
+    except ValueError:
+        raise ValueError(translate("site.file_missing")) from None
+    if not os.path.isfile(absolute_path):
+        raise ValueError(translate("site.file_missing"))
+    return {
+        "page": page,
+        "selector": selector,
+        "tag": str(payload.get("tag") or "").strip()[:40],
+        "text": str(payload.get("text") or "").strip()[:500],
+        "html": str(payload.get("html") or "").strip()[:2000],
+        "image_src": str(payload.get("image_src") or "").strip()[:500],
+    }
+
+
+def selection_prompt_block(selection):
+    if not selection:
+        return ""
+    lines = [
+        "Targeted visual change (the user selected this element in the page preview):",
+        f"- Page file: {selection.get('page')}",
+        f"- Element selector: {selection.get('selector')}",
+    ]
+    tag = (selection.get("tag") or "").upper()
+    text = selection.get("text") or ""
+    if tag or text:
+        lines.append(f"- Element: <{tag or '?'}> with visible text {text[:200]!r}")
+    html_excerpt = selection.get("html") or ""
+    if html_excerpt:
+        lines.append(f"- Element HTML: {html_excerpt[:1500]}")
+    image_src = selection.get("image_src") or ""
+    if image_src:
+        lines.append(f"- Element image source: {image_src}")
+    lines.append(
+        f"Apply the user's request to this element or its section. Prefer editing {selection.get('page')}; leave the rest of the site unchanged."
+    )
+    return "\n".join(lines)
+
+
+def inject_preview_picker(html_text, page=""):
+    hint = translate("site.preview_picker_hint").replace('"', "")
+    safe_page = (page or "").replace("\\", "/").strip().strip("/").replace('"', "")
+    tag = (
+        f'<script id="oneboard-picker" src="/static/js/preview-picker.js"'
+        f' data-hint="{hint}" data-page="{safe_page}" data-active="0"></script>'
+    )
+    if re.search(r"</body\s*>", html_text, re.IGNORECASE):
+        return re.sub(r"</body\s*>", f"{tag}</body>", html_text, count=1, flags=re.IGNORECASE)
+    return f"{html_text}{tag}"
+
+
+def serve_workspace_preview_file(user_id, filepath, picker=False):
+    absolute_path = resolve_site_file(user_id, filepath or "")
+    if not os.path.isfile(absolute_path):
+        raise ValueError(translate("site.file_missing"))
+    mime_type = mimetypes.guess_type(absolute_path)[0] or "application/octet-stream"
+    extension = os.path.splitext(absolute_path)[1].lower()
+    if picker and extension in {".htm", ".html"}:
+        with open(absolute_path, "r", encoding="utf-8", errors="replace") as handle:
+            html_text = handle.read()
+        return Response(inject_preview_picker(html_text, filepath), mimetype="text/html")
+    return send_file(absolute_path, mimetype=mime_type)
+
+
+def read_snapshot_member(snapshot_path, filepath):
+    if not snapshot_path or not os.path.isfile(snapshot_path):
+        return None
+    normalized = (filepath or "").replace("\\", "/").strip().strip("/")
+    if not normalized or normalized.startswith("/") or contains_parent_reference(normalized):
+        return None
+    if relative_path_has_reserved_component(normalized):
+        return None
+    try:
+        with zipfile.ZipFile(snapshot_path, "r") as archive:
+            try:
+                info = archive.getinfo(normalized)
+            except KeyError:
+                return None
+            if info.is_dir() or info.file_size > 10 * 1024 * 1024:
+                return None
+            return archive.read(normalized)
+    except (zipfile.BadZipFile, OSError):
+        return None
+
+
+def compare_file_kind(path):
+    extension = os.path.splitext(path or "")[1].lower()
+    if extension in {".htm", ".html"} or extension in PREVIEW_IMAGE_EXTENSIONS:
+        return "visual"
+    if is_text_file(path or ""):
+        return "text"
+    return "binary"
+
+
+def build_update_compare(user_id, update_id):
+    update = require_update_for_current_directory(user_id, update_id)
+    require_project_permission(user_id, "view")
+    files = []
+    for item in update.get("files") or []:
+        path = item.get("path") or ""
+        change = item.get("change") or "modified"
+        before_url = None
+        after_url = None
+        if change != "created" and update.get("snapshot_path"):
+            before_url = url_for(
+                "site_manager_update_before_file", update_id=update["id"], filepath=path
+            )
+        if change != "deleted":
+            after_url = url_for("site_manager_preview_file", filepath=path)
+        files.append(
+            {
+                "path": path,
+                "change": change,
+                "kind": compare_file_kind(path),
+                "before_url": before_url,
+                "after_url": after_url,
+            }
+        )
+    return {
+        "update": {
+            "id": update["id"],
+            "source": update.get("source"),
+            "summary": update.get("summary"),
+            "status": update.get("status"),
+            "created_at": update.get("created_at"),
+            "author_name": update.get("author_name"),
+        },
+        "files": files,
+    }
+
+
+HEALTH_MAX_FILES = 300
+HEALTH_MAX_EXTERNAL_URLS = 25
+HEALTH_EXTERNAL_TIMEOUT = 6
+HEALTH_HEAVY_IMAGE_BYTES = 500 * 1024
+HEALTH_MAX_PARSE_BYTES = 2 * 1024 * 1024
+
+
+class _SiteHtmlInspector(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.title = None
+        self.h1 = None
+        self.links = []
+        self.images = []
+        self.forms = []
+        self._in_title = False
+        self._in_h1 = False
+        self._title_chunks = []
+        self._h1_chunks = []
+        self._link_stack = []
+        self._form_stack = []
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if tag == "title" and self.title is None:
+            self._in_title = True
+            self._title_chunks = []
+        if tag == "h1" and self.h1 is None:
+            self._in_h1 = True
+            self._h1_chunks = []
+        if tag == "a":
+            self._link_stack.append({"href": attributes.get("href", ""), "text": ""})
+        if tag == "img":
+            self.images.append(
+                {
+                    "src": attributes.get("src", ""),
+                    "alt": attributes.get("alt"),
+                    "occurrence": sum(1 for item in self.images if item["src"] == attributes.get("src", "")),
+                }
+            )
+        if tag == "form":
+            self._form_stack.append(
+                {
+                    "action": attributes.get("action", ""),
+                    "method": (attributes.get("method", "") or "get").lower(),
+                    "inputs": [],
+                    "has_submit": False,
+                    "index": len(self.forms),
+                }
+            )
+        if tag in ("input", "select", "textarea") and self._form_stack:
+            form = self._form_stack[-1]
+            field_type = (attributes.get("type", "") or "").lower()
+            if tag == "input" and field_type in ("submit", "image"):
+                form["has_submit"] = True
+                return
+            form["inputs"].append(
+                {
+                    "tag": tag,
+                    "type": field_type,
+                    "name": attributes.get("name"),
+                    "id": attributes.get("id", ""),
+                    "placeholder": attributes.get("placeholder", ""),
+                }
+            )
+        if tag == "button" and self._form_stack:
+            button_type = (attributes.get("type", "") or "submit").lower()
+            if button_type not in ("button", "reset"):
+                self._form_stack[-1]["has_submit"] = True
+
+    def handle_endtag(self, tag):
+        if tag == "title" and self._in_title:
+            self.title = "".join(self._title_chunks).strip()
+            self._in_title = False
+        if tag == "h1" and self._in_h1:
+            self.h1 = "".join(self._h1_chunks).strip()
+            self._in_h1 = False
+        if tag == "a" and self._link_stack:
+            link = self._link_stack.pop()
+            link["text"] = link["text"].strip()
+            link["occurrence"] = sum(
+                1 for item in self.links if item["href"] == link["href"]
+            )
+            self.links.append(link)
+        if tag == "form" and self._form_stack:
+            self.forms.append(self._form_stack.pop())
+
+    def handle_data(self, data):
+        if self._in_title:
+            self._title_chunks.append(data)
+        if self._in_h1:
+            self._h1_chunks.append(data)
+        if self._link_stack:
+            self._link_stack[-1]["text"] += data
+
+
+def finding_fingerprint(*parts):
+    joined = "\x00".join(str(part or "") for part in parts)
+    return hashlib.sha1(joined.encode("utf-8")).hexdigest()
+
+
+def slugify_field_name(value, fallback):
+    slug = re.sub(r"[^a-z0-9]+", "_", (value or "").strip().lower()).strip("_")
+    return (slug or fallback)[:40]
+
+
+def pretty_name_from_filename(path):
+    stem = posixpath.splitext(posixpath.basename(path or ""))[0]
+    if stem.lower() == "index":
+        return "Home"
+    words = re.sub(r"[-_]+", " ", stem).strip()
+    return words[:60].title() or stem[:60]
+
+
+def suggest_page_title(page, h1, brand):
+    base = (h1 or "").strip()[:100] or pretty_name_from_filename(page)
+    business = (brand.get("business_name") or "").strip()
+    if business and business.lower() not in base.lower():
+        base = f"{base} | {business}"
+    return base[:140]
+
+
+def split_link_reference(href):
+    candidate = (href or "").strip()
+    if not candidate:
+        return ("skip", "")
+    lowered = candidate.lower()
+    if lowered.startswith(("#", "mailto:", "tel:", "sms:", "javascript:", "data:", "blob:")):
+        return ("skip", "")
+    if lowered.startswith("//"):
+        return ("external", f"https:{candidate}")
+    if lowered.startswith(("http://", "https://")):
+        return ("external", candidate)
+    target = candidate.split("?", 1)[0].split("#", 1)[0].strip()
+    if not target:
+        return ("skip", "")
+    return ("internal", target)
+
+
+def resolve_internal_reference(page, reference):
+    base = posixpath.dirname(page or "")
+    return posixpath.normpath(posixpath.join(base, reference.lstrip("/")))
+
+
+def external_error_detail(error, fallback_code=None):
+    if isinstance(error, (TimeoutError, socket.timeout)):
+        return "timeout"
+    reason = getattr(error, "reason", None)
+    if isinstance(reason, (TimeoutError, socket.timeout)):
+        return "timeout"
+    if isinstance(reason, str) and reason:
+        return reason[:120]
+    if isinstance(error, ssl.SSLError):
+        return "TLS error"
+    if fallback_code:
+        return f"HTTP {fallback_code}"
+    text = str(error).strip()
+    return (text[:120] if text else "unreachable")
+
+
+def check_external_url(url, timeout=HEALTH_EXTERNAL_TIMEOUT):
+    headers = {"User-Agent": "ONEBoard-health/1.0"}
+    try:
+        request = urllib.request.Request(url, method="HEAD", headers=headers)
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            status = getattr(response, "status", 200)
+            return (True, "") if status < 400 else (False, f"HTTP {status}")
+    except urllib.error.HTTPError as error:
+        if error.code in (403, 405):
+            try:
+                request = urllib.request.Request(
+                    url, headers={**headers, "Range": "bytes=0-0"}
+                )
+                with urllib.request.urlopen(request, timeout=timeout) as response:
+                    status = getattr(response, "status", 200)
+                    return (True, "") if status < 400 else (False, f"HTTP {status}")
+            except Exception as retry_error:
+                return (False, external_error_detail(retry_error, error.code))
+        return (False, f"HTTP {error.code}")
+    except Exception as error:
+        return (False, external_error_detail(error))
+
+
+def inspect_site_page_text(page_text):
+    inspector = _SiteHtmlInspector()
+    try:
+        inspector.feed(page_text)
+        inspector.close()
+    except (ValueError, TypeError):
+        pass
+    while inspector._link_stack:
+        link = inspector._link_stack.pop()
+        link["occurrence"] = sum(1 for item in inspector.links if item["href"] == link["href"])
+        inspector.links.append(link)
+    while inspector._form_stack:
+        inspector.forms.append(inspector._form_stack.pop())
+    return inspector
+
+
+def collect_site_health_findings(real_path, manifest, brand, skip_external=False):
+    files = sorted(path for path, item in manifest.items() if item.get("kind") == "file")
+    files = files[:HEALTH_MAX_FILES]
+    file_set = set(files)
+    collected = []
+    externals = []
+
+    for relpath in files:
+        extension = posixpath.splitext(relpath)[1].lower()
+        if extension not in (".htm", ".html"):
+            continue
+        absolute_path = os.path.join(real_path, *relpath.split("/"))
+        try:
+            if os.path.getsize(absolute_path) > HEALTH_MAX_PARSE_BYTES:
+                continue
+            with open(absolute_path, "r", encoding="utf-8", errors="replace") as handle:
+                page_text = handle.read()
+        except OSError:
+            continue
+        inspector = inspect_site_page_text(page_text)
+        if not inspector.title:
+            collected.append(
+                {
+                    "check": "missing_title",
+                    "severity": "warning",
+                    "page": relpath,
+                    "detail": relpath,
+                    "proposal": {"title": suggest_page_title(relpath, inspector.h1, brand)},
+                    "fingerprint": finding_fingerprint("missing_title", relpath),
+                }
+            )
+        for link in inspector.links:
+            kind, target = split_link_reference(link["href"])
+            if kind == "skip":
+                continue
+            if kind == "external":
+                if not skip_external and len(externals) < HEALTH_MAX_EXTERNAL_URLS:
+                    externals.append((relpath, link["occurrence"], target))
+                continue
+            resolved = resolve_internal_reference(relpath, target)
+            if resolved in file_set or posixpath.join(resolved, "index.html") in file_set:
+                continue
+            collected.append(
+                {
+                    "check": "broken_internal_link",
+                    "severity": "error",
+                    "page": relpath,
+                    "detail": link["href"][:300],
+                    "proposal": {"action": "unlink", "href": link["href"][:300], "occurrence": link["occurrence"]},
+                    "fingerprint": finding_fingerprint("broken_internal_link", relpath, link["href"], link["occurrence"]),
+                }
+            )
+        for image in inspector.images:
+            src = (image["src"] or "").strip()
+            if not src or image.get("alt"):
+                continue
+            kind, _target = split_link_reference(src)
+            if kind == "external":
+                continue
+            collected.append(
+                {
+                    "check": "missing_alt",
+                    "severity": "warning",
+                    "page": relpath,
+                    "detail": src[:300],
+                    "proposal": {
+                        "alt": pretty_name_from_filename(src),
+                        "src": src[:300],
+                        "occurrence": image["occurrence"],
+                    },
+                    "fingerprint": finding_fingerprint("missing_alt", relpath, src, image["occurrence"]),
+                }
+            )
+        for form in inspector.forms:
+            action = (form["action"] or "").strip()
+            if not action or action.startswith("#"):
+                collected.append(
+                    {
+                        "check": "form_no_action",
+                        "severity": "error",
+                        "page": relpath,
+                        "detail": f"form #{form['index'] + 1}",
+                        "proposal": {"guidance": "site.guide_form_action"},
+                        "fingerprint": finding_fingerprint("form_no_action", relpath, form["index"]),
+                    }
+                )
+            elif split_link_reference(action)[0] == "internal":
+                resolved = resolve_internal_reference(relpath, split_link_reference(action)[1])
+                if resolved not in file_set:
+                    collected.append(
+                        {
+                            "check": "form_no_action",
+                            "severity": "error",
+                            "page": relpath,
+                            "detail": f"form #{form['index'] + 1} → {action[:200]}",
+                            "proposal": {"guidance": "site.guide_form_action"},
+                            "fingerprint": finding_fingerprint("form_no_action", relpath, form["index"], action),
+                        }
+                    )
+            if not form["has_submit"]:
+                collected.append(
+                    {
+                        "check": "form_no_submit",
+                        "severity": "warning",
+                        "page": relpath,
+                        "detail": f"form #{form['index'] + 1}",
+                        "proposal": {"guidance": "site.guide_form_submit"},
+                        "fingerprint": finding_fingerprint("form_no_submit", relpath, form["index"]),
+                    }
+                )
+            nameless_index = 0
+            for field in form["inputs"]:
+                if field.get("name"):
+                    continue
+                if field["tag"] == "input" and field["type"] in ("submit", "button", "image", "reset"):
+                    continue
+                proposal_name = slugify_field_name(
+                    field["id"] or field["placeholder"], f"field_{nameless_index + 1}"
+                )
+                collected.append(
+                    {
+                        "check": "form_input_name",
+                        "severity": "warning",
+                        "page": relpath,
+                        "detail": (field["id"] or field["placeholder"] or field["tag"])[:120],
+                        "proposal": {
+                            "name": proposal_name,
+                            "occurrence": nameless_index,
+                            "form_index": form["index"],
+                        },
+                        "fingerprint": finding_fingerprint(
+                            "form_input_name", relpath, form["index"], nameless_index,
+                            field["id"], field["placeholder"],
+                        ),
+                    }
+                )
+                nameless_index += 1
+
+    for relpath in files:
+        if posixpath.splitext(relpath)[1].lower() not in PREVIEW_IMAGE_EXTENSIONS:
+            continue
+        absolute_path = os.path.join(real_path, *relpath.split("/"))
+        try:
+            size_bytes = os.path.getsize(absolute_path)
+        except OSError:
+            continue
+        if size_bytes > HEALTH_HEAVY_IMAGE_BYTES:
+            collected.append(
+                {
+                    "check": "heavy_image",
+                    "severity": "warning",
+                    "page": relpath,
+                    "detail": f"{relpath} ({format_bytes(size_bytes)})",
+                    "proposal": {"action": "optimize"},
+                    "fingerprint": finding_fingerprint("heavy_image", relpath),
+                }
+            )
+
+    if externals and not skip_external:
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            checks = list(pool.map(lambda item: (item, check_external_url(item[2])), externals))
+        for (page, occurrence, url), (ok, detail) in checks:
+            if ok:
+                continue
+            collected.append(
+                {
+                    "check": "broken_external_link",
+                    "severity": "warning",
+                    "page": page,
+                    "detail": f"{url[:300]} ({detail})" if detail else url[:300],
+                    "proposal": {"action": "unlink", "href": url[:300], "occurrence": occurrence, "guidance": "site.guide_external"},
+                    "fingerprint": finding_fingerprint("broken_external_link", page, url, occurrence),
+                }
+            )
+
+    return collected, len(files)
+
+
+def serialize_site_finding(row):
+    finding = dict(row)
+    finding["check"] = finding.pop("check_type", "")
+    try:
+        finding["proposal"] = json.loads(row["proposal"] or "{}")
+    except (TypeError, json.JSONDecodeError):
+        finding["proposal"] = {}
+    return finding
+
+
+def get_site_health(user_id):
+    directory = require_site_directory(user_id)
+    real_path = os.path.realpath(directory["path"])
+    require_project_permission(user_id, "view")
+    rows = query_db(
+        """
+        SELECT * FROM site_findings
+        WHERE directory_path = ? AND status = 'open'
+        ORDER BY CASE WHEN severity = 'error' THEN 0 ELSE 1 END, page ASC, id ASC
+        """,
+        (real_path,),
+    )
+    ignored = query_db(
+        "SELECT * FROM site_findings WHERE directory_path = ? AND status = 'ignored' ORDER BY page ASC, id ASC",
+        (real_path,),
+    )
+    last_scan = query_db(
+        "SELECT * FROM site_scans WHERE directory_path = ? ORDER BY id DESC LIMIT 1",
+        (real_path,),
+        one=True,
+    )
+    try:
+        require_project_permission(user_id, "edit")
+        can_edit = True
+    except TeamAccessDenied:
+        can_edit = False
+    return {
+        "findings": [serialize_site_finding(row) for row in rows],
+        "ignored": [serialize_site_finding(row) for row in ignored],
+        "ignored_count": len(ignored),
+        "open_count": len(rows),
+        "last_scan": dict(last_scan) if last_scan else None,
+        "can_edit": can_edit,
+    }
+
+
+def sidebar_badge_counts():
+    empty = {
+        "health_open": 0,
+        "requests_open": 0,
+        "inbox_new": 0,
+        "alerts_open": 0,
+        "notifications_unread": 0,
+    }
+    try:
+        if not has_request_context() or g.get("user") is None:
+            return dict(empty)
+        user_id = g.user["id"]
+        return {
+            "health_open": get_health_summary(user_id)["open_count"],
+            "requests_open": count_open_client_requests(user_id),
+            "inbox_new": count_new_contact_messages(user_id),
+            "alerts_open": count_open_site_alerts(user_id),
+            "notifications_unread": count_unread_notifications(user_id),
+        }
+    except (sqlite3.OperationalError, ValueError, TypeError, KeyError):
+        return dict(empty)
+
+
+def get_health_summary(user_id):
+    directory = get_site_directory(user_id)
+    if not directory:
+        return {"open_count": 0, "last_scan": None}
+    real_path = os.path.realpath(directory["path"])
+    open_count = query_db(
+        "SELECT COUNT(*) AS total FROM site_findings WHERE directory_path = ? AND status = 'open'",
+        (real_path,),
+        one=True,
+    )["total"]
+    last_scan = query_db(
+        "SELECT finished_at FROM site_scans WHERE directory_path = ? ORDER BY id DESC LIMIT 1",
+        (real_path,),
+        one=True,
+    )
+    return {
+        "open_count": open_count,
+        "last_scan": last_scan["finished_at"] if last_scan else None,
+    }
+
+
+def run_site_health_scan(user_id, skip_external=False):
+    directory = require_site_directory(user_id)
+    real_path = os.path.realpath(directory["path"])
+    require_project_permission(user_id, "view")
+    scan_id = execute_db(
+        "INSERT INTO site_scans (user_id, directory_path, skipped_external) VALUES (?, ?, ?)",
+        (user_id, real_path, 1 if skip_external else 0),
+    )
+    manifest = build_workspace_manifest(real_path)
+    brand = current_workspace_brand(user_id)
+    collected, files_checked = collect_site_health_findings(
+        real_path, manifest, brand, skip_external=skip_external
+    )
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for finding in collected:
+        existing = query_db(
+            "SELECT id, status FROM site_findings WHERE directory_path = ? AND fingerprint = ?",
+            (real_path, finding["fingerprint"]),
+            one=True,
+        )
+        if existing is None:
+            execute_db(
+                """
+                INSERT INTO site_findings (
+                    user_id, directory_path, fingerprint, check_type, severity,
+                    page, detail, proposal, status, last_seen_at, last_seen_scan_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)
+                """,
+                (
+                    user_id,
+                    real_path,
+                    finding["fingerprint"],
+                    finding["check"],
+                    finding["severity"],
+                    finding["page"],
+                    finding["detail"],
+                    json.dumps(finding["proposal"]),
+                    now,
+                    scan_id,
+                ),
+            )
+        elif existing["status"] == "ignored":
+            execute_db(
+                "UPDATE site_findings SET last_seen_at = ?, last_seen_scan_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (now, scan_id, existing["id"]),
+            )
+        else:
+            execute_db(
+                """
+                UPDATE site_findings
+                SET user_id = ?, check_type = ?, severity = ?, page = ?, detail = ?,
+                    proposal = ?, status = 'open', resolved_by = NULL, resolved_at = NULL,
+                    last_seen_at = ?, last_seen_scan_id = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    user_id,
+                    finding["check"],
+                    finding["severity"],
+                    finding["page"],
+                    finding["detail"],
+                    json.dumps(finding["proposal"]),
+                    now,
+                    scan_id,
+                    existing["id"],
+                ),
+            )
+    execute_db(
+        """
+        UPDATE site_findings
+        SET status = 'resolved', resolved_by = 'scan', resolved_at = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE directory_path = ? AND status = 'open'
+          AND (last_seen_scan_id IS NULL OR last_seen_scan_id <> ?)
+          AND (? = 0 OR check_type <> 'broken_external_link')
+        """,
+        (now, real_path, scan_id, 1 if skip_external else 0),
+    )
+    open_count = query_db(
+        "SELECT COUNT(*) AS total FROM site_findings WHERE directory_path = ? AND status = 'open'",
+        (real_path,),
+        one=True,
+    )["total"]
+    execute_db(
+        "UPDATE site_scans SET finished_at = ?, files_checked = ?, open_count = ? WHERE id = ?",
+        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), files_checked, open_count, scan_id),
+    )
+    return get_site_health(user_id)
+
+
+def set_html_title_text(html_text, title):
+    title = (title or "").strip()
+    if not title:
+        raise ValueError(translate("flash.fix_value_required"))
+    escaped = html.escape(title[:160], quote=True)
+    replacement = f"<title>{escaped}</title>"
+    updated, count = re.subn(
+        r"<title[^>]*>.*?</title\s*>", replacement, html_text, count=1, flags=re.IGNORECASE | re.DOTALL
+    )
+    if count:
+        return updated
+    updated, count = re.subn(
+        r"(<head[^>]*>)", rf"\1{replacement}", html_text, count=1, flags=re.IGNORECASE
+    )
+    if count:
+        return updated
+    updated, count = re.subn(
+        r"(<html[^>]*>)", rf"\1<head>{replacement}</head>", html_text, count=1, flags=re.IGNORECASE
+    )
+    if count:
+        return updated
+    return f"<head>{replacement}</head>{html_text}"
+
+
+def replace_nth_match(html_text, pattern, occurrence, replacement):
+    matches = list(re.finditer(pattern, html_text, flags=re.IGNORECASE | re.DOTALL))
+    if occurrence < 0 or occurrence >= len(matches):
+        raise ValueError(translate("flash.finding_not_found"))
+    match = matches[occurrence]
+    return html_text[: match.start()] + replacement(match) + html_text[match.end() :]
+
+
+def unlink_href_occurrence(html_text, href, occurrence):
+    pattern = r"<a\b([^>]*?)href=([\"'])" + re.escape(href) + r"\2([^>]*?)>(.*?)</a\s*>"
+
+    def _keep_text(match):
+        return match.group(4)
+
+    return replace_nth_match(html_text, pattern, occurrence, _keep_text)
+
+
+def set_img_alt_occurrence(html_text, src, occurrence, alt):
+    escaped = html.escape((alt or "").strip()[:200], quote=True)
+    if not escaped:
+        raise ValueError(translate("flash.fix_value_required"))
+    pattern = r"<img\b[^>]*?src=([\"'])" + re.escape(src) + r"\1[^>]*?>"
+
+    def _add_alt(match):
+        tag = match.group(0)
+        if re.search(r"\balt\s*=", tag, flags=re.IGNORECASE):
+            raise ValueError(translate("flash.finding_not_found"))
+        if tag.rstrip().endswith("/>"):
+            return tag.rstrip()[:-2].rstrip() + f' alt="{escaped}"/>'
+        return tag[:-1].rstrip() + f' alt="{escaped}">'
+
+    return replace_nth_match(html_text, pattern, occurrence, _add_alt)
+
+
+def set_input_name_occurrence(html_text, occurrence, name):
+    name = slugify_field_name(name, "")
+    if not name:
+        raise ValueError(translate("flash.fix_value_required"))
+    candidates = [
+        match
+        for match in re.finditer(r"<(?:input|select|textarea)\b[^>]*>", html_text, flags=re.IGNORECASE)
+        if not re.search(r"\bname\s*=", match.group(0), flags=re.IGNORECASE)
+    ]
+    if occurrence < 0 or occurrence >= len(candidates):
+        raise ValueError(translate("flash.finding_not_found"))
+    match = candidates[occurrence]
+    tag = match.group(0)
+    if tag.rstrip().endswith("/>"):
+        fixed = tag.rstrip()[:-2].rstrip() + f' name="{html.escape(name, quote=True)}"/>'
+    else:
+        fixed = tag[:-1].rstrip() + f' name="{html.escape(name, quote=True)}">'
+    return html_text[: match.start()] + fixed + html_text[match.end() :]
+
+
+def optimize_site_image(absolute_path):
+    try:
+        from PIL import Image
+    except ImportError:
+        raise ValueError(translate("site.guide_heavy_no_pillow")) from None
+    if os.path.getsize(absolute_path) > 30 * 1024 * 1024:
+        raise ValueError(translate("site.guide_heavy_no_pillow"))
+    with open(absolute_path, "rb") as handle:
+        original_bytes = handle.read()
+    try:
+        with Image.open(absolute_path) as image:
+            image_format = (image.format or "").upper() or posixpath.splitext(absolute_path)[1].upper().lstrip(".")
+            if max(image.size) > 1600:
+                image.thumbnail((1600, 1600))
+            save_kwargs = {}
+            if image_format in ("JPEG", "JPG"):
+                if image.mode in ("RGBA", "P", "LA"):
+                    image = image.convert("RGB")
+                save_kwargs = {"quality": 82, "optimize": True}
+                image_format = "JPEG"
+            elif image_format == "PNG":
+                save_kwargs = {"optimize": True}
+            elif image_format == "WEBP":
+                save_kwargs = {"quality": 82}
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".oneboard-opt") as staged:
+                staged_path = staged.name
+            try:
+                image.save(staged_path, image_format or "PNG", **save_kwargs)
+                optimized_bytes = open(staged_path, "rb").read()
+            finally:
+                try:
+                    os.remove(staged_path)
+                except OSError:
+                    pass
+    except (OSError, ValueError) as error:
+        raise ValueError(translate("site.guide_heavy_no_pillow")) from error
+    if len(optimized_bytes) >= len(original_bytes):
+        return len(original_bytes), len(original_bytes)
+    with open(absolute_path, "wb") as handle:
+        handle.write(optimized_bytes)
+    return len(original_bytes), len(optimized_bytes)
+
+
+AUTO_FIXABLE_CHECKS = frozenset(
+    {
+        "missing_title",
+        "broken_internal_link",
+        "broken_external_link",
+        "missing_alt",
+        "form_input_name",
+        "heavy_image",
+    }
+)
+
+
+def _apply_single_finding_fix(user_id, finding, payload):
+    proposal = finding["proposal"]
+    check = finding["check"]
+    payload = payload or {}
+    if check not in AUTO_FIXABLE_CHECKS:
+        raise ValueError(translate(proposal.get("guidance") or "site.guide_form_action"))
+    absolute_path = resolve_site_file(user_id, finding["page"] or "")
+    if not os.path.isfile(absolute_path):
+        raise ValueError(translate("flash.finding_not_found"))
+    summary = ""
+    if check == "missing_title":
+        title = str(payload.get("title") or proposal.get("title") or "").strip()
+        with open(absolute_path, "r", encoding="utf-8", errors="replace") as handle:
+            updated_text = set_html_title_text(handle.read(), title)
+        with open(absolute_path, "w", encoding="utf-8") as handle:
+            handle.write(updated_text)
+        summary = f"Action center: set page title on {finding['page']}"
+    elif check in ("broken_internal_link", "broken_external_link"):
+        with open(absolute_path, "r", encoding="utf-8", errors="replace") as handle:
+            updated_text = unlink_href_occurrence(
+                handle.read(), proposal.get("href") or "", int(proposal.get("occurrence") or 0)
+            )
+        with open(absolute_path, "w", encoding="utf-8") as handle:
+            handle.write(updated_text)
+        summary = f"Action center: removed broken link on {finding['page']}"
+    elif check == "missing_alt":
+        alt = str(payload.get("alt") or proposal.get("alt") or "").strip()
+        with open(absolute_path, "r", encoding="utf-8", errors="replace") as handle:
+            updated_text = set_img_alt_occurrence(
+                handle.read(), proposal.get("src") or "", int(proposal.get("occurrence") or 0), alt
+            )
+        with open(absolute_path, "w", encoding="utf-8") as handle:
+            handle.write(updated_text)
+        summary = f"Action center: added alt text on {finding['page']}"
+    elif check == "form_input_name":
+        name = str(payload.get("name") or proposal.get("name") or "").strip()
+        with open(absolute_path, "r", encoding="utf-8", errors="replace") as handle:
+            updated_text = set_input_name_occurrence(
+                handle.read(), int(proposal.get("occurrence") or 0), name
+            )
+        with open(absolute_path, "w", encoding="utf-8") as handle:
+            handle.write(updated_text)
+        summary = f"Action center: named form field on {finding['page']}"
+    elif check == "heavy_image":
+        before_size, after_size = optimize_site_image(absolute_path)
+        if after_size >= before_size:
+            summary = f"Action center: image already optimal {finding['page']}"
+        else:
+            summary = f"Action center: optimized image {finding['page']} ({format_bytes(before_size)} → {format_bytes(after_size)})"
+    else:
+        raise ValueError(translate("flash.finding_not_found"))
+    return summary
+
+
+def _resolve_findings(finding_ids, resolved_by="fix"):
+    if not finding_ids:
+        return
+    placeholders = ", ".join("?" for _ in finding_ids)
+    execute_db(
+        f"""
+        UPDATE site_findings
+        SET status = 'resolved', resolved_by = ?, resolved_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id IN ({placeholders})
+        """,
+        (resolved_by, *finding_ids),
+    )
+
+
+def _record_action_center_history(user_id, real_path, snapshot_path, before_manifest, summary):
+    changed_files = compare_workspace_manifests(
+        before_manifest, build_workspace_manifest(real_path)
+    )
+    record_update_history(
+        user_id,
+        "action-center",
+        summary,
+        "0",
+        status="approved",
+        snapshot_path=snapshot_path,
+        changed_files=[{"path": item["path"], "change": item["change"]} for item in changed_files],
+        diff_summary="",
+        directory_path=real_path,
+    )
+    return changed_files
+
+
+def apply_site_finding(user_id, finding_id, payload):
+    directory = require_site_directory(user_id)
+    real_path = os.path.realpath(directory["path"])
+    require_project_permission(user_id, "edit")
+    try:
+        finding_id = int(finding_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.finding_not_found"))
+    row = query_db(
+        "SELECT * FROM site_findings WHERE id = ? AND directory_path = ? AND status = 'open'",
+        (finding_id, real_path),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.finding_not_found"))
+    finding = serialize_site_finding(row)
+    snapshot_path = create_update_snapshot(user_id, real_path)
+    before_manifest = build_workspace_manifest(real_path)
+    summary = _apply_single_finding_fix(user_id, finding, payload)
+    _record_action_center_history(user_id, real_path, snapshot_path, before_manifest, summary)
+    _resolve_findings([finding["id"]], resolved_by="fix")
+    return get_site_health(user_id)
+
+
+def apply_all_site_findings(user_id):
+    directory = require_site_directory(user_id)
+    real_path = os.path.realpath(directory["path"])
+    require_project_permission(user_id, "edit")
+    rows = query_db(
+        "SELECT * FROM site_findings WHERE directory_path = ? AND status = 'open'"
+        " ORDER BY page ASC, id ASC",
+        (real_path,),
+    )
+    findings = [serialize_site_finding(row) for row in rows]
+    if not findings:
+        raise ValueError(translate("flash.no_fixes"))
+    fixable = [item for item in findings if item["check"] in AUTO_FIXABLE_CHECKS]
+    skipped = [item for item in findings if item["check"] not in AUTO_FIXABLE_CHECKS]
+    if not fixable:
+        raise ValueError(translate("flash.no_fixes"))
+    snapshot_path = create_update_snapshot(user_id, real_path)
+    before_manifest = build_workspace_manifest(real_path)
+    applied_ids = []
+    try:
+        for finding in fixable:
+            _apply_single_finding_fix(user_id, finding, {})
+            applied_ids.append(finding["id"])
+    except (ValueError, OSError) as error:
+        try:
+            restore_workspace_changes(
+                real_path,
+                snapshot_path,
+                compare_workspace_manifests(before_manifest, build_workspace_manifest(real_path)),
+            )
+        except (ValueError, OSError, zipfile.BadZipFile, KeyError, TypeError):
+            pass
+        raise error
+    summary = f"Action center: applied {len(applied_ids)} automatic fixes"
+    _record_action_center_history(user_id, real_path, snapshot_path, before_manifest, summary)
+    _resolve_findings(applied_ids, resolved_by="fix-all")
+    health = get_site_health(user_id)
+    return {
+        "health": health,
+        "fixed": len(applied_ids),
+        "skipped": len(skipped),
+        "skipped_checks": sorted({item["check"] for item in skipped}),
+    }
+
+
+def summarize_health_with_ai(user_id, provider=None, model=None):
+    health = get_site_health(user_id)
+    findings = health["findings"]
+    if not findings:
+        raise ValueError(translate("flash.no_fixes"))
+    prompt_lines = ["Open website issues to explain:"]
+    for finding in findings[:30]:
+        prompt_lines.append(
+            f"- [{finding['severity']}] {finding['check']} on {finding['page']}: {finding['detail']}"
+        )
+    run = run_ai_text_task(
+        user_id, "health_summary", "\n".join(prompt_lines), provider=provider, model=model
+    )
+    return {"summary": (run["response_text"] or "").strip(), "provider": run["provider"]}
+
+
+def run_ai_health_fix(user_id, finding_ids=None, provider=None, model=None):
+    directory = require_site_directory(user_id)
+    real_path = os.path.realpath(directory["path"])
+    require_project_permission(user_id, "edit")
+    provider, model = resolve_ai_provider_model(user_id, provider=provider, model=model)
+    if not get_user_ai_provider_api_key(user_id, provider):
+        raise ValueError(f"No API key configured for provider '{provider}'.")
+    rows = query_db(
+        "SELECT * FROM site_findings WHERE directory_path = ? AND status = 'open'"
+        " ORDER BY page ASC, id ASC",
+        (real_path,),
+    )
+    findings = [serialize_site_finding(row) for row in rows]
+    wanted = set()
+    if finding_ids:
+        for raw_id in finding_ids:
+            try:
+                wanted.add(int(raw_id))
+            except (TypeError, ValueError):
+                continue
+        findings = [item for item in findings if item["id"] in wanted]
+    if not findings:
+        raise ValueError(translate("flash.no_fixes"))
+    affected_pages = sorted({item["page"] for item in findings if item["page"]})
+    site_context = []
+    for relpath in affected_pages:
+        try:
+            absolute_path = resolve_site_file(user_id, relpath)
+        except ValueError:
+            continue
+        if not os.path.isfile(absolute_path):
+            continue
+        try:
+            if os.path.getsize(absolute_path) > HEALTH_MAX_PARSE_BYTES:
+                continue
+            with open(absolute_path, "r", encoding="utf-8", errors="replace") as handle:
+                content = handle.read()
+        except OSError:
+            continue
+        if "\x00" in content:
+            continue
+        site_context.append({"path": relpath, "content": content[:12000]})
+    issue_lines = [
+        f"- [#{item['id']}] [{item['severity']}] {item['check']} on {item['page']}: {item['detail']}"
+        f" (suggested fix: {json.dumps(item['proposal'], ensure_ascii=False)})"
+        for item in findings
+    ]
+    fix_prompt = (
+        "Fix every website issue listed below by editing the affected files. "
+        "For forms without destination, wire them to a sensible receiver or add a working "
+        "mailto/form endpoint with a submit button; for forms without submit button, add one. "
+        "Keep the design and all other content unchanged.\n\nIssues:\n" + "\n".join(issue_lines)
+    )
+    instruction = build_site_direct_edit_instruction(
+        fix_prompt, site_context, brand_context=current_workspace_brand_text(user_id)
+    )
+    snapshot_path = create_update_snapshot(user_id, real_path)
+    before_manifest = build_workspace_manifest(real_path)
+    text, usage, resolved_model = run_ai_provider_prompt(user_id, provider, model, instruction)
+    try:
+        plan = parse_site_ai_update_plan(text)
+        apply_site_ai_update_plan(real_path, plan)
+    except ValueError as error:
+        try:
+            restore_workspace_changes(
+                real_path,
+                snapshot_path,
+                compare_workspace_manifests(before_manifest, build_workspace_manifest(real_path)),
+            )
+        except (ValueError, OSError, zipfile.BadZipFile, KeyError, TypeError):
+            pass
+        save_ai_run(
+            user_id, provider, resolved_model, "health_fix", instruction,
+            response_text=text, status="failed", error_text=str(error), usage=usage,
+        )
+        raise error
+    save_ai_run(
+        user_id, provider, resolved_model, "health_fix", instruction,
+        response_text=text, usage=usage,
+    )
+    summary = f"Action center: AI fix ({provider}) — {(plan.get('summary') or 'issues fixed').strip()[:200]}"
+    _record_action_center_history(user_id, real_path, snapshot_path, before_manifest, summary)
+    target_ids = {item["id"] for item in findings}
+    health = run_site_health_scan(user_id, skip_external=True)
+    still_open = {
+        item["id"] for item in health["findings"] if item["id"] in target_ids
+    } | {
+        item["id"] for item in health["ignored"] if item["id"] in target_ids
+    }
+    fixed = len(target_ids - still_open)
+    return {"health": health, "fixed": fixed, "pages": affected_pages, "provider": provider}
+
+
+def ignore_site_finding(user_id, finding_id, ignored=True):
+    directory = require_site_directory(user_id)
+    real_path = os.path.realpath(directory["path"])
+    require_project_permission(user_id, "edit")
+    try:
+        finding_id = int(finding_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.finding_not_found"))
+    row = query_db(
+        "SELECT id FROM site_findings WHERE id = ? AND directory_path = ?",
+        (finding_id, real_path),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.finding_not_found"))
+    execute_db(
+        "UPDATE site_findings SET status = ?, resolved_by = NULL, resolved_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        ("ignored" if ignored else "open", finding_id),
+    )
+    return get_site_health(user_id)
+
+
+REQUEST_STATUSES = ("open", "in_review", "proposed", "approved", "rejected", "done")
+REQUEST_ATTACHMENT_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "gif", "pdf"}
+REQUEST_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
+
+
+def require_current_request_workspace(user_id):
+    workspace = get_current_workspace(user_id)
+    if not workspace:
+        raise ValueError(translate("flash.site_directory_unmapped"))
+    return workspace
+
+
+def serialize_request_link(row):
+    link = dict(row)
+    now = int(time.time())
+    link["revoked"] = bool(link["revoked"])
+    link["expired"] = bool(link["expires_at"] and link["expires_at"] <= now)
+    link["active"] = not link["revoked"] and not link["expired"]
+    return link
+
+
+def create_request_link(user_id, label="", expires_days=None):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "manage")
+    expires_at = None
+    if expires_days not in (None, ""):
+        try:
+            days = int(str(expires_days).strip())
+        except (TypeError, ValueError):
+            raise ValueError(translate("flash.invalid_transition"))
+        if days < 0 or days > 3650:
+            raise ValueError(translate("flash.invalid_transition"))
+        if days > 0:
+            expires_at = int(time.time()) + days * 86400
+    token = secrets.token_urlsafe(48)
+    link_id = execute_db(
+        """
+        INSERT INTO request_links (workspace_id, label, token_hash, created_by, expires_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            workspace["id"],
+            str(label or "").strip()[:120],
+            hashlib.sha256(token.encode("utf-8")).hexdigest(),
+            user_id,
+            expires_at,
+        ),
+    )
+    row = query_db("SELECT * FROM request_links WHERE id = ?", (link_id,), one=True)
+    return serialize_request_link(row), token
+
+
+def list_request_links(user_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "view")
+    rows = query_db(
+        "SELECT * FROM request_links WHERE workspace_id = ? ORDER BY id DESC",
+        (workspace["id"],),
+    )
+    return [serialize_request_link(row) for row in rows]
+
+
+def revoke_request_link(user_id, link_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "manage")
+    try:
+        link_id = int(link_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.request_not_found"))
+    row = query_db(
+        "SELECT id FROM request_links WHERE id = ? AND workspace_id = ?",
+        (link_id, workspace["id"]),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.request_not_found"))
+    execute_db("UPDATE request_links SET revoked = 1 WHERE id = ?", (link_id,))
+
+
+def get_client_link(token):
+    if not token:
+        return None
+    token_hash = hashlib.sha256(str(token).encode("utf-8")).hexdigest()
+    row = query_db(
+        """
+        SELECT l.*, w.path AS workspace_path, w.display_name AS workspace_display_name
+        FROM request_links l
+        JOIN website_workspaces w ON w.id = l.workspace_id
+        WHERE l.token_hash = ?
+        """,
+        (token_hash,),
+        one=True,
+    )
+    if not row:
+        return None
+    link = serialize_request_link(row)
+    if not link["active"]:
+        return None
+    return link
+
+
+def serialize_client_request(row):
+    return dict(row)
+
+
+def serialize_request_comment(row):
+    return dict(row)
+
+
+def serialize_request_attachment(row):
+    return dict(row)
+
+
+def get_request_attachments(request_id):
+    rows = query_db(
+        "SELECT * FROM request_attachments WHERE request_id = ? ORDER BY id ASC",
+        (request_id,),
+    )
+    return [serialize_request_attachment(row) for row in rows]
+
+
+def get_request_comments(request_id):
+    rows = query_db(
+        "SELECT * FROM request_comments WHERE request_id = ? ORDER BY id ASC",
+        (request_id,),
+    )
+    return [serialize_request_comment(row) for row in rows]
+
+
+def serialize_request_thread(request_row):
+    payload = serialize_client_request(request_row)
+    payload["comments"] = get_request_comments(request_row["id"])
+    payload["attachments"] = get_request_attachments(request_row["id"])
+    return payload
+
+
+def list_workspace_requests(user_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "view")
+    rows = query_db(
+        """
+        SELECT r.*, l.label AS link_label,
+               (SELECT COUNT(*) FROM request_comments c WHERE c.request_id = r.id) AS comment_count,
+               (SELECT COUNT(*) FROM request_attachments a WHERE a.request_id = r.id) AS attachment_count
+        FROM client_requests r
+        LEFT JOIN request_links l ON l.id = r.link_id
+        WHERE r.workspace_id = ?
+        ORDER BY r.updated_at DESC, r.id DESC
+        """,
+        (workspace["id"],),
+    )
+    return [dict(row) for row in rows]
+
+
+def get_agency_request_thread(user_id, request_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "view")
+    try:
+        request_id = int(request_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.request_not_found"))
+    row = query_db(
+        "SELECT * FROM client_requests WHERE id = ? AND workspace_id = ?",
+        (request_id, workspace["id"]),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.request_not_found"))
+    return serialize_request_thread(row)
+
+
+def get_portal_request_thread(link, request_id):
+    try:
+        request_id = int(request_id)
+    except (TypeError, ValueError):
+        return None
+    row = query_db(
+        "SELECT * FROM client_requests WHERE id = ? AND link_id = ? AND workspace_id = ?",
+        (request_id, link["id"], link["workspace_id"]),
+        one=True,
+    )
+    if not row:
+        return None
+    return serialize_request_thread(row)
+
+
+def list_link_requests(link):
+    rows = query_db(
+        """
+        SELECT r.*,
+               (SELECT COUNT(*) FROM request_comments c WHERE c.request_id = r.id) AS comment_count
+        FROM client_requests r
+        WHERE r.link_id = ? AND r.workspace_id = ?
+        ORDER BY r.updated_at DESC, r.id DESC
+        """,
+        (link["id"], link["workspace_id"]),
+    )
+    return [dict(row) for row in rows]
+
+
+def resolve_link_page(link, page):
+    candidate = (page or "").replace("\\", "/").strip().strip("/")
+    if not candidate or candidate.startswith("/") or contains_parent_reference(candidate):
+        return None
+    if relative_path_has_reserved_component(candidate):
+        return None
+    absolute_path = os.path.realpath(os.path.join(link["workspace_path"], *candidate.split("/")))
+    root = os.path.realpath(link["workspace_path"])
+    if absolute_path != root and not absolute_path.startswith(root + os.sep):
+        return None
+    if not os.path.isfile(absolute_path):
+        return None
+    return absolute_path
+
+
+def serve_link_preview_file(link, filepath, picker=False):
+    absolute_path = resolve_link_page(link, filepath or "")
+    if absolute_path is None:
+        return None
+    mime_type = mimetypes.guess_type(absolute_path)[0] or "application/octet-stream"
+    extension = os.path.splitext(absolute_path)[1].lower()
+    if picker and extension in {".htm", ".html"}:
+        with open(absolute_path, "r", encoding="utf-8", errors="replace") as handle:
+            html_text = handle.read()
+        return Response(inject_preview_picker(html_text, filepath), mimetype="text/html")
+    return send_file(absolute_path, mimetype=mime_type)
+
+
+def create_client_request(link, fields, files):
+    message = str(fields.get("message") or "").strip()
+    if not message:
+        raise ValueError(translate("flash.fix_value_required"))
+    page = str(fields.get("page") or "").replace("\\", "/").strip().strip("/")[:300]
+    selector = str(fields.get("selector") or "").strip()[:500]
+    if page and resolve_link_page(link, page) is None:
+        raise ValueError(translate("flash.request_not_found"))
+    request_id = execute_db(
+        """
+        INSERT INTO client_requests (
+            workspace_id, link_id, page, selector, tag, text, html_excerpt, image_src,
+            client_name, message, status
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')
+        """,
+        (
+            link["workspace_id"],
+            link["id"],
+            page,
+            selector,
+            str(fields.get("tag") or "").strip()[:40],
+            str(fields.get("text") or "").strip()[:500],
+            str(fields.get("html") or "").strip()[:2000],
+            str(fields.get("image_src") or "").strip()[:500],
+            str(fields.get("client_name") or "").strip()[:80],
+            message[:2000],
+        ),
+    )
+    save_request_attachments(request_id, None, "client", files)
+    row = query_db("SELECT * FROM client_requests WHERE id = ?", (request_id,), one=True)
+    notify_workspace(
+        link["workspace_id"],
+        "request",
+        f"{row['client_name'] or '?'}: {row['message'][:120]}",
+        row["page"] or "",
+        f"/site-manager/requests/{request_id}",
+    )
+    return serialize_request_thread(row)
+
+
+def add_request_comment_by_id(request_id, side, author_name, body, user_id=None):
+    body = str(body or "").strip()
+    if not body:
+        raise ValueError(translate("flash.fix_value_required"))
+    comment_id = execute_db(
+        """
+        INSERT INTO request_comments (request_id, side, user_id, author_name, body)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            request_id,
+            side,
+            user_id,
+            str(author_name or "").strip()[:80],
+            body[:2000],
+        ),
+    )
+    execute_db(
+        "UPDATE client_requests SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (request_id,),
+    )
+    row = query_db("SELECT * FROM request_comments WHERE id = ?", (comment_id,), one=True)
+    return serialize_request_comment(row)
+
+
+def request_attachment_directory():
+    directory = os.path.join(UPLOAD_DIR, "request-attachments")
+    os.makedirs(directory, exist_ok=True)
+    return directory
+
+
+def save_request_attachments(request_id, comment_id, side, files):
+    saved = []
+    if not files:
+        return saved
+    if hasattr(files, "getlist"):
+        uploads = files.getlist("attachment") or files.getlist("attachments") or []
+    elif isinstance(files, dict):
+        uploads = []
+        for value in files.values():
+            uploads.extend(value if isinstance(value, list) else [value])
+    else:
+        uploads = list(files)
+    directory = request_attachment_directory()
+    for upload in uploads:
+        filename = (getattr(upload, "filename", "") or "").strip()
+        if not filename:
+            continue
+        extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if extension not in REQUEST_ATTACHMENT_EXTENSIONS:
+            raise ValueError(translate("flash.attachment_invalid"))
+        if extension != "pdf" and not uploaded_image_matches_extension(upload, extension):
+            raise ValueError(translate("flash.attachment_invalid"))
+        try:
+            upload.stream.seek(0, os.SEEK_END)
+            size_bytes = upload.stream.tell()
+            upload.stream.seek(0)
+        except (AttributeError, OSError):
+            size_bytes = 0
+        if size_bytes > REQUEST_ATTACHMENT_MAX_BYTES:
+            raise ValueError(translate("flash.attachment_invalid"))
+        stored = f"req-{request_id}-{secrets.token_hex(8)}.{extension}"
+        upload.save(os.path.join(directory, stored))
+        try:
+            size_bytes = os.path.getsize(os.path.join(directory, stored))
+        except OSError:
+            size_bytes = 0
+        attachment_id = execute_db(
+            """
+            INSERT INTO request_attachments (
+                request_id, comment_id, filename, original_name, mime, size_bytes, side
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                request_id,
+                comment_id,
+                stored,
+                posixpath.basename(filename)[:128],
+                mimetypes.guess_type(filename)[0] or "application/octet-stream",
+                size_bytes,
+                side,
+            ),
+        )
+        row = query_db("SELECT * FROM request_attachments WHERE id = ?", (attachment_id,), one=True)
+        saved.append(serialize_request_attachment(row))
+    return saved
+
+
+def remove_request_attachment_files(filenames):
+    directory = request_attachment_directory()
+    for filename in filenames:
+        try:
+            os.remove(os.path.join(directory, posixpath.basename(filename or "")))
+        except OSError:
+            pass
+
+
+def agency_add_comment(user_id, request_id, body, files=None):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "edit")
+    try:
+        request_id = int(request_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.request_not_found"))
+    row = query_db(
+        "SELECT * FROM client_requests WHERE id = ? AND workspace_id = ?",
+        (request_id, workspace["id"]),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.request_not_found"))
+    user = query_db("SELECT name FROM users WHERE id = ?", (user_id,), one=True)
+    comment = add_request_comment_by_id(
+        request_id, "team", (user["name"] if user else ""), body, user_id=user_id
+    )
+    save_request_attachments(request_id, comment["id"], "team", files)
+    notify_workspace(
+        workspace["id"],
+        "request",
+        f"{(user['name'] if user else '?')} commented on request #{request_id}",
+        str(body or "").strip()[:200],
+        f"/site-manager/requests/{request_id}",
+        exclude_user_id=user_id,
+    )
+    return get_agency_request_thread(user_id, request_id)
+
+
+def agency_set_request_status(user_id, request_id, status, proposal=None):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "edit")
+    status = str(status or "").strip().lower()
+    if status not in ("open", "in_review", "proposed", "done"):
+        raise ValueError(translate("flash.invalid_transition"))
+    try:
+        request_id = int(request_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.request_not_found"))
+    row = query_db(
+        "SELECT * FROM client_requests WHERE id = ? AND workspace_id = ?",
+        (request_id, workspace["id"]),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.request_not_found"))
+    proposal_text = row["proposal_text"] or ""
+    if proposal is not None:
+        proposal_text = str(proposal or "").strip()[:2000]
+    if status == "proposed" and not proposal_text:
+        raise ValueError(translate("flash.fix_value_required"))
+    execute_db(
+        """
+        UPDATE client_requests
+        SET status = ?, proposal_text = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (status, proposal_text, request_id),
+    )
+    return get_agency_request_thread(user_id, request_id)
+
+
+def agency_delete_request(user_id, request_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "edit")
+    try:
+        request_id = int(request_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.request_not_found"))
+    row = query_db(
+        "SELECT id FROM client_requests WHERE id = ? AND workspace_id = ?",
+        (request_id, workspace["id"]),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.request_not_found"))
+    attachments = query_db(
+        "SELECT filename FROM request_attachments WHERE request_id = ?", (request_id,)
+    )
+    remove_request_attachment_files([item["filename"] for item in attachments])
+    execute_db("DELETE FROM request_attachments WHERE request_id = ?", (request_id,))
+    execute_db("DELETE FROM request_comments WHERE request_id = ?", (request_id,))
+    execute_db("DELETE FROM client_requests WHERE id = ?", (request_id,))
+
+
+def portal_add_comment(link, request_id, author_name, body, files=None):
+    thread = get_portal_request_thread(link, request_id)
+    if not thread:
+        raise ValueError(translate("flash.request_not_found"))
+    comment = add_request_comment_by_id(thread["id"], "client", author_name, body)
+    save_request_attachments(thread["id"], comment["id"], "client", files)
+    notify_workspace(
+        link["workspace_id"],
+        "request",
+        f"{str(author_name or '?').strip() or '?'} commented on request #{thread['id']}",
+        str(body or "").strip()[:200],
+        f"/site-manager/requests/{thread['id']}",
+    )
+    return get_portal_request_thread(link, thread["id"])
+
+
+def portal_decide_request(link, request_id, decision):
+    decision = str(decision or "").strip().lower()
+    if decision not in ("approved", "rejected"):
+        raise ValueError(translate("flash.invalid_transition"))
+    thread = get_portal_request_thread(link, request_id)
+    if not thread:
+        raise ValueError(translate("flash.request_not_found"))
+    if thread["status"] != "proposed":
+        raise ValueError(translate("flash.invalid_transition"))
+    execute_db(
+        "UPDATE client_requests SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (decision, thread["id"]),
+    )
+    notify_workspace(
+        link["workspace_id"],
+        "request",
+        f"Request #{thread['id']} {decision}",
+        thread["message"][:200] if thread.get("message") else "",
+        f"/site-manager/requests/{thread['id']}",
+    )
+    return get_portal_request_thread(link, thread["id"])
+
+
+def get_portal_attachment(link, filename):
+    safe_name = posixpath.basename(filename or "")
+    if not safe_name:
+        return None
+    row = query_db(
+        """
+        SELECT a.* FROM request_attachments a
+        JOIN client_requests r ON r.id = a.request_id
+        WHERE a.filename = ? AND r.workspace_id = ?
+        """,
+        (safe_name, link["workspace_id"]),
+        one=True,
+    )
+    return dict(row) if row else None
+
+
+def get_agency_attachment(user_id, filename):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "view")
+    safe_name = posixpath.basename(filename or "")
+    if not safe_name:
+        return None
+    row = query_db(
+        """
+        SELECT a.* FROM request_attachments a
+        JOIN client_requests r ON r.id = a.request_id
+        WHERE a.filename = ? AND r.workspace_id = ?
+        """,
+        (safe_name, workspace["id"]),
+        one=True,
+    )
+    return dict(row) if row else None
+
+
+def count_open_client_requests(user_id):
+    workspace = get_current_workspace(user_id)
+    if not workspace:
+        return 0
+    row = query_db(
+        """
+        SELECT COUNT(*) AS total FROM client_requests
+        WHERE workspace_id = ? AND status NOT IN ('done', 'approved')
+        """,
+        (workspace["id"],),
+        one=True,
+    )
+    return row["total"]
+
+
+CALENDAR_KINDS = ("promo", "blog", "prices", "note")
+
+
+def clean_calendar_date(value):
+    text = str(value or "").strip()[:10]
+    if not text:
+        return ""
+    try:
+        datetime.strptime(text, "%Y-%m-%d")
+    except ValueError:
+        raise ValueError(translate("flash.invalid_dates"))
+    return text
+
+
+def serialize_calendar_event(row):
+    event = dict(row)
+    stored = event.get("status") or "scheduled"
+    today = date.today().isoformat()
+    starts_on = event.get("starts_on") or ""
+    ends_on = event.get("ends_on") or ""
+    if stored in ("done", "cancelled"):
+        event["status"] = stored
+    elif ends_on and ends_on < today:
+        event["status"] = "expired"
+    elif starts_on and starts_on > today:
+        event["status"] = "scheduled"
+    else:
+        event["status"] = "active"
+    return event
+
+
+def list_calendar_events(user_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "view")
+    rows = query_db(
+        "SELECT * FROM scheduled_events WHERE workspace_id = ? ORDER BY starts_on ASC, id ASC",
+        (workspace["id"],),
+    )
+    return [serialize_calendar_event(row) for row in rows]
+
+
+def create_calendar_event(user_id, kind="note", title="", brief="", page="", starts_on="", ends_on=""):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "edit")
+    kind = str(kind or "note").strip().lower()
+    if kind not in CALENDAR_KINDS:
+        kind = "note"
+    title = str(title or "").strip()
+    if not title:
+        raise ValueError(translate("flash.fix_value_required"))
+    starts_on = clean_calendar_date(starts_on) or date.today().isoformat()
+    ends_on = clean_calendar_date(ends_on)
+    if ends_on and ends_on < starts_on:
+        raise ValueError(translate("flash.invalid_dates"))
+    event_id = execute_db(
+        """
+        INSERT INTO scheduled_events (workspace_id, created_by, kind, title, brief, page, starts_on, ends_on, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scheduled')
+        """,
+        (
+            workspace["id"],
+            user_id,
+            kind,
+            title[:160],
+            str(brief or "").strip()[:4000],
+            str(page or "").strip()[:300],
+            starts_on,
+            ends_on,
+        ),
+    )
+    row = query_db("SELECT * FROM scheduled_events WHERE id = ?", (event_id,), one=True)
+    return serialize_calendar_event(row)
+
+
+def update_calendar_event(user_id, event_id, **fields):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "edit")
+    try:
+        event_id = int(event_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.event_not_found"))
+    row = query_db(
+        "SELECT * FROM scheduled_events WHERE id = ? AND workspace_id = ?",
+        (event_id, workspace["id"]),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.event_not_found"))
+    updates = {}
+    if "kind" in fields and fields["kind"] is not None:
+        kind = str(fields["kind"]).strip().lower()
+        updates["kind"] = kind if kind in CALENDAR_KINDS else "note"
+    if "title" in fields and fields["title"] is not None:
+        title = str(fields["title"]).strip()
+        if not title:
+            raise ValueError(translate("flash.fix_value_required"))
+        updates["title"] = title[:160]
+    if "brief" in fields and fields["brief"] is not None:
+        updates["brief"] = str(fields["brief"]).strip()[:4000]
+    if "page" in fields and fields["page"] is not None:
+        updates["page"] = str(fields["page"]).strip()[:300]
+    starts_on = clean_calendar_date(fields.get("starts_on", row["starts_on"]))
+    ends_on = clean_calendar_date(fields.get("ends_on", row["ends_on"]))
+    if "starts_on" in fields or "ends_on" in fields:
+        if ends_on and ends_on < (starts_on or ""):
+            raise ValueError(translate("flash.invalid_dates"))
+        updates["starts_on"] = starts_on or date.today().isoformat()
+        updates["ends_on"] = ends_on
+    if updates:
+        assignments = ", ".join(f"{column} = ?" for column in updates)
+        execute_db(
+            f"UPDATE scheduled_events SET {assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (*updates.values(), event_id),
+        )
+    row = query_db("SELECT * FROM scheduled_events WHERE id = ?", (event_id,), one=True)
+    return serialize_calendar_event(row)
+
+
+def cancel_calendar_event(user_id, event_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "edit")
+    try:
+        event_id = int(event_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.event_not_found"))
+    row = query_db(
+        "SELECT * FROM scheduled_events WHERE id = ? AND workspace_id = ?",
+        (event_id, workspace["id"]),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.event_not_found"))
+    execute_db(
+        "UPDATE scheduled_events SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (event_id,),
+    )
+    row = query_db("SELECT * FROM scheduled_events WHERE id = ?", (event_id,), one=True)
+    return serialize_calendar_event(row)
+
+
+def delete_calendar_event(user_id, event_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "edit")
+    try:
+        event_id = int(event_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.event_not_found"))
+    row = query_db(
+        "SELECT id FROM scheduled_events WHERE id = ? AND workspace_id = ?",
+        (event_id, workspace["id"]),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.event_not_found"))
+    execute_db("DELETE FROM scheduled_events WHERE id = ?", (event_id,))
+
+
+def execute_calendar_event(user_id, event_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "edit")
+    try:
+        event_id = int(event_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.event_not_found"))
+    row = query_db(
+        "SELECT * FROM scheduled_events WHERE id = ? AND workspace_id = ?",
+        (event_id, workspace["id"]),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.event_not_found"))
+    brief = (row["brief"] or "").strip()
+    if not brief:
+        raise ValueError(translate("flash.fix_value_required"))
+    terminal = run_site_codex_update(user_id, f"[{row['kind']}] {row['title']}\n\n{brief}")
+    directory = require_site_directory(user_id)
+    latest = query_db(
+        """
+        SELECT id FROM website_update_history
+        WHERE user_id = ? AND directory_path = ?
+        ORDER BY id DESC LIMIT 1
+        """,
+        (user_id, os.path.realpath(directory["path"])),
+        one=True,
+    )
+    execute_db(
+        "UPDATE scheduled_events SET status = 'done', update_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (latest["id"] if latest else None, event_id),
+    )
+    row = query_db("SELECT * FROM scheduled_events WHERE id = ?", (event_id,), one=True)
+    return serialize_calendar_event(row), terminal
+
+
+FORM_SUBMIT_LOG = {}
+FORM_SUBMIT_GUARD = threading.Lock()
+FORM_RATE_LIMIT_COUNT = 20
+FORM_RATE_LIMIT_WINDOW = 3600
+
+
+class FormRateLimited(ValueError):
+    pass
+
+
+def create_form_token(user_id, label=""):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "manage")
+    token = secrets.token_urlsafe(32)
+    token_id = execute_db(
+        "INSERT INTO form_tokens (workspace_id, label, token, token_hash, created_by) VALUES (?, ?, ?, ?, ?)",
+        (
+            workspace["id"],
+            str(label or "").strip()[:120],
+            token,
+            hashlib.sha256(token.encode("utf-8")).hexdigest(),
+            user_id,
+        ),
+    )
+    row = query_db("SELECT * FROM form_tokens WHERE id = ?", (token_id,), one=True)
+    return dict(row), token
+
+
+def list_form_tokens(user_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "view")
+    rows = query_db(
+        "SELECT * FROM form_tokens WHERE workspace_id = ? ORDER BY id DESC",
+        (workspace["id"],),
+    )
+    return [dict(row) for row in rows]
+
+
+def latest_form_token(user_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "view")
+    row = query_db(
+        "SELECT * FROM form_tokens WHERE workspace_id = ? AND revoked = 0 ORDER BY id DESC LIMIT 1",
+        (workspace["id"],),
+        one=True,
+    )
+    return dict(row) if row else None
+
+
+def revoke_form_token(user_id, token_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "manage")
+    try:
+        token_id = int(token_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.message_not_found"))
+    row = query_db(
+        "SELECT id FROM form_tokens WHERE id = ? AND workspace_id = ?",
+        (token_id, workspace["id"]),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.message_not_found"))
+    execute_db("UPDATE form_tokens SET revoked = 1 WHERE id = ?", (token_id,))
+
+
+def get_form_token(token):
+    if not token:
+        return None
+    token_hash = hashlib.sha256(str(token).encode("utf-8")).hexdigest()
+    row = query_db(
+        """
+        SELECT t.*, w.path AS workspace_path
+        FROM form_tokens t
+        JOIN website_workspaces w ON w.id = t.workspace_id
+        WHERE t.token_hash = ? AND t.revoked = 0
+        """,
+        (token_hash,),
+        one=True,
+    )
+    return dict(row) if row else None
+
+
+def check_form_rate_limit(key):
+    now = time.time()
+    with FORM_SUBMIT_GUARD:
+        entries = [moment for moment in FORM_SUBMIT_LOG.get(key, []) if now - moment < FORM_RATE_LIMIT_WINDOW]
+        if len(entries) >= FORM_RATE_LIMIT_COUNT:
+            FORM_SUBMIT_LOG[key] = entries
+            return False
+        entries.append(now)
+        FORM_SUBMIT_LOG[key] = entries
+        return True
+
+
+def submit_contact_message(token, remote_addr, fields):
+    form_token = get_form_token(token)
+    if not form_token:
+        return None
+    if not check_form_rate_limit(f"{remote_addr or 'unknown'}:{form_token['id']}"):
+        raise FormRateLimited(translate("flash.invalid_transition"))
+    message = str(fields.get("message") or "").strip()
+    if not message:
+        raise ValueError(translate("flash.fix_value_required"))
+    message_id = execute_db(
+        """
+        INSERT INTO contact_messages (workspace_id, page, name, email, phone, message, meta, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'new')
+        """,
+        (
+            form_token["workspace_id"],
+            str(fields.get("page") or "")[:300],
+            str(fields.get("name") or "").strip()[:120],
+            str(fields.get("email") or "").strip()[:160],
+            str(fields.get("phone") or "").strip()[:60],
+            message[:4000],
+            json.dumps({"ip": (remote_addr or "")[:64]}),
+        ),
+    )
+    row = query_db("SELECT * FROM contact_messages WHERE id = ?", (message_id,), one=True)
+    sender = (row["name"] or row["email"] or "?").strip()
+    notify_workspace(
+        form_token["workspace_id"],
+        "inbox",
+        f"{sender} — {row['page'] or '/'}",
+        row["message"][:200],
+        "/site-manager/inbox",
+    )
+    return dict(row)
+
+
+def list_contact_messages(user_id, status=None):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "view")
+    if status in ("new", "attended"):
+        rows = query_db(
+            "SELECT * FROM contact_messages WHERE workspace_id = ? AND status = ? ORDER BY id DESC",
+            (workspace["id"], status),
+        )
+    else:
+        rows = query_db(
+            "SELECT * FROM contact_messages WHERE workspace_id = ? ORDER BY id DESC",
+            (workspace["id"],),
+        )
+    return [dict(row) for row in rows]
+
+
+def set_contact_message_status(user_id, message_id, status):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "edit")
+    if status not in ("new", "attended"):
+        raise ValueError(translate("flash.invalid_transition"))
+    try:
+        message_id = int(message_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.message_not_found"))
+    row = query_db(
+        "SELECT id FROM contact_messages WHERE id = ? AND workspace_id = ?",
+        (message_id, workspace["id"]),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.message_not_found"))
+    execute_db(
+        "UPDATE contact_messages SET status = ? WHERE id = ?", (status, message_id)
+    )
+    row = query_db("SELECT * FROM contact_messages WHERE id = ?", (message_id,), one=True)
+    return dict(row)
+
+
+def delete_contact_message(user_id, message_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "edit")
+    try:
+        message_id = int(message_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.message_not_found"))
+    row = query_db(
+        "SELECT id FROM contact_messages WHERE id = ? AND workspace_id = ?",
+        (message_id, workspace["id"]),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.message_not_found"))
+    execute_db("DELETE FROM contact_messages WHERE id = ?", (message_id,))
+
+
+def build_form_snippet(submit_url):
+    return f"""<form method="post" action="{submit_url}">
+  <input type="text" name="name" placeholder="Name" required>
+  <input type="email" name="email" placeholder="Email" required>
+  <input type="text" name="phone" placeholder="Phone">
+  <input type="hidden" name="page" value="/contact">
+  <textarea name="message" placeholder="Message" required></textarea>
+  <button type="submit">Send</button>
+</form>"""
+
+
+def count_new_contact_messages(user_id):
+    workspace = get_current_workspace(user_id)
+    if not workspace:
+        return 0
+    row = query_db(
+        "SELECT COUNT(*) AS total FROM contact_messages WHERE workspace_id = ? AND status = 'new'",
+        (workspace["id"],),
+        one=True,
+    )
+    return row["total"]
+
+
+ALERT_RULE_KINDS = ("uptime", "tls")
+ALERT_CHECK_TIMEOUT = 10
+
+
+def check_site_uptime(url, timeout=ALERT_CHECK_TIMEOUT):
+    candidate = str(url or "").strip()
+    if not candidate.lower().startswith(("http://", "https://")):
+        return (False, "invalid URL")
+    try:
+        request = urllib.request.Request(candidate, headers={"User-Agent": "ONEBoard-alerts/1.0"})
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            status = getattr(response, "status", 200)
+            return (True, f"HTTP {status}") if status < 400 else (False, f"HTTP {status}")
+    except urllib.error.HTTPError as error:
+        return (False, f"HTTP {error.code}")
+    except Exception as error:
+        return (False, external_error_detail(error))
+
+
+def get_tls_expiry(host, port=443, timeout=ALERT_CHECK_TIMEOUT):
+    hostname = str(host or "").strip()
+    if "://" in hostname:
+        hostname = urllib.parse.urlsplit(hostname).hostname or hostname
+    hostname = hostname.split("/")[0].split(":")[0].strip()
+    if not hostname:
+        raise ValueError("invalid host")
+    context = ssl.create_default_context()
+    with socket.create_connection((hostname, port), timeout=timeout) as raw:
+        with context.wrap_socket(raw, server_hostname=hostname) as tls:
+            certificate = tls.getpeercert()
+    not_after = (certificate or {}).get("notAfter")
+    if not not_after:
+        raise ValueError("no certificate data")
+    return datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
+
+
+def normalize_alert_target(kind, target):
+    target = str(target or "").strip()[:300]
+    if kind == "uptime":
+        if not target.lower().startswith(("http://", "https://")):
+            raise ValueError(translate("flash.fix_value_required"))
+        return target
+    if "://" in target:
+        target = urllib.parse.urlsplit(target).hostname or target
+    target = target.split("/")[0].split(":")[0].strip()
+    if not target or " " in target:
+        raise ValueError(translate("flash.fix_value_required"))
+    return target.lower()
+
+
+def create_alert_rule(user_id, kind="uptime", target="", name="", threshold_days=14):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "edit")
+    kind = str(kind or "uptime").strip().lower()
+    if kind not in ALERT_RULE_KINDS:
+        kind = "uptime"
+    target = normalize_alert_target(kind, target)
+    try:
+        threshold_days = int(threshold_days)
+    except (TypeError, ValueError):
+        threshold_days = 14
+    threshold_days = max(1, min(threshold_days, 365))
+    rule_id = execute_db(
+        """
+        INSERT INTO alert_rules (workspace_id, kind, target, name, threshold_days, enabled, created_by)
+        VALUES (?, ?, ?, ?, ?, 1, ?)
+        """,
+        (workspace["id"], kind, target, str(name or "").strip()[:120], threshold_days, user_id),
+    )
+    row = query_db("SELECT * FROM alert_rules WHERE id = ?", (rule_id,), one=True)
+    return dict(row)
+
+
+def list_alert_rules(user_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "view")
+    rows = query_db(
+        "SELECT * FROM alert_rules WHERE workspace_id = ? ORDER BY id ASC",
+        (workspace["id"],),
+    )
+    return [dict(row) for row in rows]
+
+
+def update_alert_rule(user_id, rule_id, **fields):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "edit")
+    try:
+        rule_id = int(rule_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.rule_not_found"))
+    row = query_db(
+        "SELECT * FROM alert_rules WHERE id = ? AND workspace_id = ?",
+        (rule_id, workspace["id"]),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.rule_not_found"))
+    updates = {}
+    if "name" in fields and fields["name"] is not None:
+        updates["name"] = str(fields["name"]).strip()[:120]
+    if "enabled" in fields and fields["enabled"] is not None:
+        raw = fields["enabled"]
+        updates["enabled"] = 1 if raw in (True, 1, "1", "true", "yes", "on") else 0
+    if "threshold_days" in fields and fields["threshold_days"] is not None:
+        try:
+            updates["threshold_days"] = max(1, min(int(fields["threshold_days"]), 365))
+        except (TypeError, ValueError):
+            pass
+    if updates:
+        assignments = ", ".join(f"{column} = ?" for column in updates)
+        execute_db(
+            f"UPDATE alert_rules SET {assignments} WHERE id = ?", (*updates.values(), rule_id)
+        )
+    row = query_db("SELECT * FROM alert_rules WHERE id = ?", (rule_id,), one=True)
+    return dict(row)
+
+
+def delete_alert_rule(user_id, rule_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "edit")
+    try:
+        rule_id = int(rule_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.rule_not_found"))
+    row = query_db(
+        "SELECT id FROM alert_rules WHERE id = ? AND workspace_id = ?",
+        (rule_id, workspace["id"]),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.rule_not_found"))
+    execute_db("UPDATE site_alerts SET rule_id = NULL WHERE rule_id = ?", (rule_id,))
+    execute_db("DELETE FROM alert_rules WHERE id = ?", (rule_id,))
+
+
+def list_site_alerts(user_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "view")
+    rows = query_db(
+        """
+        SELECT a.*, r.name AS rule_name, r.target AS rule_target
+        FROM site_alerts a
+        LEFT JOIN alert_rules r ON r.id = a.rule_id
+        WHERE a.workspace_id = ?
+        ORDER BY CASE a.status WHEN 'open' THEN 0 WHEN 'acked' THEN 1 ELSE 2 END,
+                 a.updated_at DESC, a.id DESC
+        LIMIT 200
+        """,
+        (workspace["id"],),
+    )
+    return [dict(row) for row in rows]
+
+
+def open_workspace_alert(workspace_id, kind, title, detail, rule_id=None, severity="error"):
+    if rule_id is not None:
+        existing = query_db(
+            "SELECT id FROM site_alerts WHERE workspace_id = ? AND rule_id = ? AND status IN ('open', 'acked')",
+            (workspace_id, rule_id),
+            one=True,
+        )
+        if existing:
+            execute_db(
+                """
+                UPDATE site_alerts
+                SET title = ?, detail = ?, severity = ?, status = 'open',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (title[:200], detail[:500], severity, existing["id"]),
+            )
+            return existing["id"]
+    else:
+        existing = query_db(
+            "SELECT id FROM site_alerts WHERE workspace_id = ? AND rule_id IS NULL AND kind = ? AND status IN ('open', 'acked')",
+            (workspace_id, kind),
+            one=True,
+        )
+        if existing:
+            execute_db(
+                "UPDATE site_alerts SET title = ?, detail = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (title[:200], detail[:500], existing["id"]),
+            )
+            return existing["id"]
+    alert_id = execute_db(
+        """
+        INSERT INTO site_alerts (workspace_id, rule_id, kind, severity, title, detail, status)
+        VALUES (?, ?, ?, ?, ?, ?, 'open')
+        """,
+        (workspace_id, rule_id, kind, severity, title[:200], detail[:500]),
+    )
+    notify_workspace(
+        workspace_id, "alert", title[:200], detail[:200], "/site-manager/alerts"
+    )
+    return alert_id
+
+
+def resolve_rule_alerts(workspace_id, rule_id):
+    execute_db(
+        """
+        UPDATE site_alerts
+        SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE workspace_id = ? AND rule_id = ? AND status IN ('open', 'acked')
+        """,
+        (workspace_id, rule_id),
+    )
+
+
+def check_alert_rule(workspace_id, rule):
+    if rule["kind"] == "uptime":
+        ok, detail = check_site_uptime(rule["target"])
+        title = f"Site down: {rule['target']}"
+    else:
+        try:
+            expiry = get_tls_expiry(rule["target"])
+            days_left = (expiry.date() - datetime.now(timezone.utc).date()).days
+            ok = days_left >= (rule["threshold_days"] or 14)
+            detail = f"{days_left} days left (expires {expiry.date().isoformat()})"
+        except Exception as error:
+            ok, detail = False, f"check failed: {external_error_detail(error)}"
+        title = f"TLS certificate: {rule['target']}"
+    execute_db(
+        "UPDATE alert_rules SET last_status = ?, last_detail = ?, last_checked_at = CURRENT_TIMESTAMP WHERE id = ?",
+        ("ok" if ok else "failing", detail[:500], rule["id"]),
+    )
+    if ok:
+        resolve_rule_alerts(workspace_id, rule["id"])
+    else:
+        open_workspace_alert(workspace_id, rule["kind"], title, detail, rule_id=rule["id"])
+    return ok
+
+
+def run_workspace_alert_checks(workspace_id):
+    rules = query_db(
+        "SELECT * FROM alert_rules WHERE workspace_id = ? AND enabled = 1 ORDER BY id ASC",
+        (workspace_id,),
+    )
+    results = []
+    for rule in rules:
+        try:
+            results.append({"rule_id": rule["id"], "ok": check_alert_rule(workspace_id, dict(rule))})
+        except Exception as error:
+            results.append({"rule_id": rule["id"], "ok": False, "error": str(error)[:200]})
+    return results
+
+
+def run_site_alert_checks(user_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "view")
+    run_workspace_alert_checks(workspace["id"])
+    return {"rules": list_alert_rules(user_id), "alerts": list_site_alerts(user_id)}
+
+
+def run_all_alert_checks():
+    rows = query_db(
+        "SELECT DISTINCT workspace_id FROM alert_rules WHERE enabled = 1", ()
+    )
+    checked = 0
+    for row in rows:
+        run_workspace_alert_checks(row["workspace_id"])
+        checked += 1
+    return checked
+
+
+def record_publish_alert(user_id, detail):
+    workspace = get_current_workspace(user_id)
+    if not workspace:
+        return None
+    return open_workspace_alert(
+        workspace["id"], "publish", "Publish failed", str(detail or "")[:500]
+    )
+
+
+def set_site_alert_status(user_id, alert_id, status):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "edit")
+    if status not in ("open", "acked", "resolved"):
+        raise ValueError(translate("flash.invalid_transition"))
+    try:
+        alert_id = int(alert_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.alert_not_found"))
+    row = query_db(
+        "SELECT id FROM site_alerts WHERE id = ? AND workspace_id = ?",
+        (alert_id, workspace["id"]),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.alert_not_found"))
+    execute_db(
+        """
+        UPDATE site_alerts
+        SET status = ?, resolved_at = CASE WHEN ? = 'resolved' THEN CURRENT_TIMESTAMP ELSE resolved_at END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (status, status, alert_id),
+    )
+    return {"rules": list_alert_rules(user_id), "alerts": list_site_alerts(user_id)}
+
+
+def count_open_site_alerts(user_id):
+    workspace = get_current_workspace(user_id)
+    if not workspace:
+        return 0
+    row = query_db(
+        "SELECT COUNT(*) AS total FROM site_alerts WHERE workspace_id = ? AND status = 'open'",
+        (workspace["id"],),
+        one=True,
+    )
+    return row["total"]
+
+
+def clean_report_period(value):
+    text = str(value or "").strip()[:7]
+    try:
+        datetime.strptime(text, "%Y-%m")
+    except ValueError:
+        raise ValueError(translate("flash.fix_value_required"))
+    return text
+
+
+def month_bounds(period):
+    year, month = int(period[:4]), int(period[5:7])
+    start = f"{period}-01 00:00:00"
+    if month == 12:
+        end = f"{year + 1}-01-01 00:00:00"
+    else:
+        end = f"{year}-{month + 1:02d}-01 00:00:00"
+    return start, end
+
+
+def fetch_search_console_totals(connection, site_url, start, end):
+    encoded_site_url = urllib.parse.quote(site_url, safe="")
+    totals = google_api_request(
+        connection,
+        f"/sites/{encoded_site_url}/searchAnalytics/query",
+        method="POST",
+        payload={"startDate": start, "endDate": end, "rowLimit": 1},
+    )
+    return format_search_stats(first_row(totals.get("rows", [])))
+
+
+def build_site_report(user_id, workspace, period):
+    period = clean_report_period(period)
+    start, end = month_bounds(period)
+    real_path = os.path.realpath(workspace["path"])
+    member_ids = team_scope_user_ids(user_id) or [user_id]
+    placeholders = ", ".join("?" for _ in member_ids)
+    changes = query_db(
+        f"""
+        SELECT created_at, source, summary, status
+        FROM website_update_history
+        WHERE user_id IN ({placeholders}) AND directory_path = ?
+          AND created_at >= ? AND created_at < ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 100
+        """,
+        (*member_ids, real_path, start, end),
+    )
+    inquiries = query_db(
+        """
+        SELECT created_at, name, email, page, message, status
+        FROM contact_messages
+        WHERE workspace_id = ? AND created_at >= ? AND created_at < ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 100
+        """,
+        (workspace["id"], start, end),
+    )
+    resolved = query_db(
+        """
+        SELECT COUNT(*) AS total FROM site_findings
+        WHERE directory_path = ? AND status = 'resolved'
+          AND resolved_at >= ? AND resolved_at < ?
+        """,
+        (real_path, start, end),
+        one=True,
+    )["total"]
+    requests_done = query_db(
+        """
+        SELECT COUNT(*) AS total FROM client_requests
+        WHERE workspace_id = ? AND status IN ('done', 'approved')
+          AND updated_at >= ? AND updated_at < ?
+        """,
+        (workspace["id"], start, end),
+        one=True,
+    )["total"]
+    visits = None
+    try:
+        connection = valid_google_connection(user_id)
+    except (GoogleApiError, ValueError):
+        connection = None
+    site_property = workspace["gsc_property"] or (
+        connection["selected_site_url"] if connection else ""
+    )
+    try:
+        visits = fetch_search_console_totals(
+            connection, site_property or "", start[:10], end[:10]
+        )
+    except Exception:
+        visits = None
+    brand = parse_site_brand(workspace["brand_json"])
+    user = query_db(
+        "SELECT company_name, company_logo_path FROM users WHERE id = ?", (user_id,), one=True
+    )
+    return {
+        "period": period,
+        "site_name": workspace["display_name"] or os.path.basename(workspace["path"].rstrip(os.sep)),
+        "client_name": workspace["client_name"] or "",
+        "logo_url": f"/uploads/brand-logos/{brand['logo']}" if brand.get("logo") else "",
+        "company_name": (user["company_name"] if user else "") or "",
+        "company_logo_url": f"/uploads/company-logos/{user['company_logo_path']}" if user and user["company_logo_path"] else "",
+        "changes": [dict(row) for row in changes],
+        "changes_count": len(changes),
+        "visits": visits,
+        "inquiries": [dict(row) for row in inquiries],
+        "inquiries_count": len(inquiries),
+        "issues_resolved": resolved,
+        "requests_done": requests_done,
+    }
+
+
+def create_site_report_link(user_id, period, title=""):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "manage")
+    period = clean_report_period(period)
+    token = secrets.token_urlsafe(32)
+    link_id = execute_db(
+        "INSERT INTO site_reports (workspace_id, period, title, token_hash, created_by) VALUES (?, ?, ?, ?, ?)",
+        (
+            workspace["id"],
+            period,
+            str(title or "").strip()[:160],
+            hashlib.sha256(token.encode("utf-8")).hexdigest(),
+            user_id,
+        ),
+    )
+    row = query_db("SELECT * FROM site_reports WHERE id = ?", (link_id,), one=True)
+    return dict(row), token
+
+
+def list_site_report_links(user_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "view")
+    rows = query_db(
+        "SELECT * FROM site_reports WHERE workspace_id = ? ORDER BY period DESC, id DESC",
+        (workspace["id"],),
+    )
+    return [dict(row) for row in rows]
+
+
+def get_site_report(user_id, link_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "view")
+    try:
+        link_id = int(link_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.report_not_found"))
+    link = query_db(
+        "SELECT * FROM site_reports WHERE id = ? AND workspace_id = ?",
+        (link_id, workspace["id"]),
+        one=True,
+    )
+    if not link:
+        raise ValueError(translate("flash.report_not_found"))
+    return build_site_report(user_id, workspace, link["period"])
+
+
+def revoke_site_report_link(user_id, link_id):
+    workspace = require_current_request_workspace(user_id)
+    require_project_permission(user_id, "manage")
+    try:
+        link_id = int(link_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.report_not_found"))
+    row = query_db(
+        "SELECT id FROM site_reports WHERE id = ? AND workspace_id = ?",
+        (link_id, workspace["id"]),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.report_not_found"))
+    execute_db("DELETE FROM site_reports WHERE id = ?", (link_id,))
+
+
+def get_site_report_link(token):
+    if not token:
+        return None
+    token_hash = hashlib.sha256(str(token).encode("utf-8")).hexdigest()
+    row = query_db(
+        """
+        SELECT r.*, w.path AS workspace_path, w.display_name, w.client_name, w.brand_json, w.gsc_property
+        FROM site_reports r
+        JOIN website_workspaces w ON w.id = r.workspace_id
+        WHERE r.token_hash = ?
+        """,
+        (token_hash,),
+        one=True,
+    )
+    return dict(row) if row else None
+
+
+def build_public_site_report(link):
+    workspace = {
+        "id": link["workspace_id"],
+        "path": link["workspace_path"],
+        "display_name": link["display_name"],
+        "client_name": link["client_name"],
+        "brand_json": link["brand_json"],
+        "gsc_property": link["gsc_property"],
+    }
+    member_rows = query_db(
+        "SELECT user_id FROM team_members WHERE team_id IN (SELECT team_id FROM website_workspaces WHERE id = ?)",
+        (workspace["id"],),
+    )
+    owner = query_db(
+        "SELECT user_id FROM website_workspaces WHERE id = ?", (workspace["id"],), one=True
+    )
+    member_ids = {row["user_id"] for row in member_rows}
+    if owner:
+        member_ids.add(owner["user_id"])
+    member_ids = list(member_ids) or [link["created_by"]]
+    period = clean_report_period(link["period"])
+    start, end = month_bounds(period)
+    real_path = os.path.realpath(workspace["path"])
+    placeholders = ", ".join("?" for _ in member_ids)
+    changes = query_db(
+        f"""
+        SELECT created_at, source, summary, status
+        FROM website_update_history
+        WHERE user_id IN ({placeholders}) AND directory_path = ?
+          AND created_at >= ? AND created_at < ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 100
+        """,
+        (*member_ids, real_path, start, end),
+    )
+    inquiries = query_db(
+        """
+        SELECT created_at, name, page, message, status
+        FROM contact_messages
+        WHERE workspace_id = ? AND created_at >= ? AND created_at < ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 100
+        """,
+        (workspace["id"], start, end),
+    )
+    resolved = query_db(
+        """
+        SELECT COUNT(*) AS total FROM site_findings
+        WHERE directory_path = ? AND status = 'resolved'
+          AND resolved_at >= ? AND resolved_at < ?
+        """,
+        (real_path, start, end),
+        one=True,
+    )["total"]
+    requests_done = query_db(
+        """
+        SELECT COUNT(*) AS total FROM client_requests
+        WHERE workspace_id = ? AND status IN ('done', 'approved')
+          AND updated_at >= ? AND updated_at < ?
+        """,
+        (workspace["id"], start, end),
+        one=True,
+    )["total"]
+    brand = parse_site_brand(workspace["brand_json"])
+    creator = query_db(
+        "SELECT company_name FROM users WHERE id = ?", (link["created_by"],), one=True
+    )
+    return {
+        "period": period,
+        "title": link["title"] or "",
+        "site_name": workspace["display_name"] or os.path.basename(workspace["path"].rstrip(os.sep)),
+        "client_name": workspace["client_name"] or "",
+        "logo_url": f"/uploads/brand-logos/{brand['logo']}" if brand.get("logo") else "",
+        "company_name": (creator["company_name"] if creator else "") or "",
+        "changes": [dict(row) for row in changes],
+        "changes_count": len(changes),
+        "visits": None,
+        "inquiries": [dict(row) for row in inquiries],
+        "inquiries_count": len(inquiries),
+        "issues_resolved": resolved,
+        "requests_done": requests_done,
+    }
+
+
+NOTIFICATION_KINDS = ("inbox", "request", "alert")
+
+
+def workspace_watcher_ids(workspace_id):
+    workspace = query_db(
+        "SELECT user_id, team_id FROM website_workspaces WHERE id = ?",
+        (workspace_id,),
+        one=True,
+    )
+    if not workspace:
+        return []
+    watchers = {workspace["user_id"]}
+    if workspace["team_id"]:
+        members = query_db(
+            "SELECT user_id, role, permissions FROM team_members WHERE team_id = ?",
+            (workspace["team_id"],),
+        )
+        for member in members:
+            if parse_team_permissions(member["permissions"], member["role"]).get("view"):
+                watchers.add(member["user_id"])
+    return sorted(watchers)
+
+
+def notify_workspace(workspace_id, kind, title, detail="", link="", exclude_user_id=None):
+    if kind not in NOTIFICATION_KINDS:
+        kind = "inbox"
+    sent = 0
+    for watcher_id in workspace_watcher_ids(workspace_id):
+        if exclude_user_id is not None and watcher_id == exclude_user_id:
+            continue
+        execute_db(
+            """
+            INSERT INTO notifications (user_id, workspace_id, kind, title, detail, link, read)
+            VALUES (?, ?, ?, ?, ?, ?, 0)
+            """,
+            (
+                watcher_id,
+                workspace_id,
+                kind,
+                str(title or "")[:200],
+                str(detail or "")[:500],
+                str(link or "")[:300],
+            ),
+        )
+        sent += 1
+    return sent
+
+
+def list_notifications(user_id, limit=100):
+    rows = query_db(
+        """
+        SELECT n.*, w.display_name AS site_name, w.path AS site_path
+        FROM notifications n
+        LEFT JOIN website_workspaces w ON w.id = n.workspace_id
+        WHERE n.user_id = ?
+        ORDER BY n.read ASC, n.id DESC
+        LIMIT ?
+        """,
+        (user_id, max(1, min(int(limit or 100), 200))),
+    )
+    return [dict(row) for row in rows]
+
+
+def count_unread_notifications(user_id):
+    row = query_db(
+        "SELECT COUNT(*) AS total FROM notifications WHERE user_id = ? AND read = 0",
+        (user_id,),
+        one=True,
+    )
+    return row["total"]
+
+
+def mark_notification_read(user_id, notification_id):
+    try:
+        notification_id = int(notification_id)
+    except (TypeError, ValueError):
+        raise ValueError(translate("flash.notification_not_found"))
+    row = query_db(
+        "SELECT id FROM notifications WHERE id = ? AND user_id = ?",
+        (notification_id, user_id),
+        one=True,
+    )
+    if not row:
+        raise ValueError(translate("flash.notification_not_found"))
+    execute_db("UPDATE notifications SET read = 1 WHERE id = ?", (notification_id,))
+
+
+def mark_all_notifications_read(user_id):
+    execute_db("UPDATE notifications SET read = 1 WHERE user_id = ?", (user_id,))
 
 
 def connect_managed_remote_workspace(user_id, workspace_path, remote):
@@ -4042,7 +11533,8 @@ def build_remote_connection_candidate(
 
 @locked_site_operation
 def save_remote_connection(user_id, host, port, username, remote_path, key_path, auth_method="key", password=""):
-    existing = get_remote_connection_private(user_id)
+    directory = require_site_directory(user_id)
+    directory_path = os.path.realpath(directory["path"])
     remote = build_remote_connection_candidate(
         user_id,
         host,
@@ -4053,14 +11545,6 @@ def save_remote_connection(user_id, host, port, username, remote_path, key_path,
         auth_method,
         password,
     )
-    same_remote = bool(
-        existing
-        and existing["host"] == remote["host"]
-        and int(existing["port"] or 22) == remote["port"]
-        and existing["username"] == remote["username"]
-        and existing["remote_path"] == remote["remote_path"]
-    )
-    directory_path = existing["directory_path"] if same_remote else None
 
     execute_db(
         """
@@ -4068,7 +11552,7 @@ def save_remote_connection(user_id, host, port, username, remote_path, key_path,
             user_id, host, port, username, remote_path, key_path, auth_method, password, directory_path
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET
+        ON CONFLICT(user_id, directory_path) DO UPDATE SET
             host = excluded.host,
             port = excluded.port,
             username = excluded.username,
@@ -4076,7 +11560,6 @@ def save_remote_connection(user_id, host, port, username, remote_path, key_path,
             key_path = excluded.key_path,
             auth_method = excluded.auth_method,
             password = excluded.password,
-            directory_path = excluded.directory_path,
             updated_at = CURRENT_TIMESTAMP
         """,
         (
@@ -4094,38 +11577,40 @@ def save_remote_connection(user_id, host, port, username, remote_path, key_path,
 
 
 def get_remote_connection(user_id):
+    """Return the remote target bound to the user's current site, if any."""
+    directory = get_site_directory(user_id)
+    if not directory:
+        return None
     row = query_db(
         """
         SELECT id, host, port, username, remote_path, key_path, auth_method,
                CASE WHEN password IS NOT NULL AND password != '' THEN 1 ELSE 0 END AS has_password,
                directory_path, created_at, updated_at
         FROM website_remote_connections
-        WHERE user_id = ?
+        WHERE user_id = ? AND directory_path = ?
         """,
-        (user_id,),
+        (user_id, os.path.realpath(directory["path"])),
         one=True,
     )
     if not row:
         return None
     remote = dict(row)
-    directory = get_site_directory(user_id)
-    remote["directory_matches"] = bool(
-        directory
-        and remote.get("directory_path")
-        and os.path.realpath(remote["directory_path"]) == os.path.realpath(directory["path"])
-    )
+    remote["directory_matches"] = True
     return remote
 
 
 def get_remote_connection_private(user_id):
+    directory = get_site_directory(user_id)
+    if not directory:
+        return None
     return query_db(
         """
         SELECT id, host, port, username, remote_path, key_path, auth_method, password, directory_path,
                created_at, updated_at
         FROM website_remote_connections
-        WHERE user_id = ?
+        WHERE user_id = ? AND directory_path = ?
         """,
-        (user_id,),
+        (user_id, os.path.realpath(directory["path"])),
         one=True,
     )
 
@@ -4262,8 +11747,12 @@ def sync_remote_site_to_workspace(user_id):
         try:
             connect_managed_remote_workspace(user_id, workspace_path, remote)
             execute_db(
-                "UPDATE website_remote_connections SET directory_path = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
-                (workspace_real_path, user_id),
+                "DELETE FROM website_remote_connections WHERE user_id = ? AND directory_path = ? AND id != ?",
+                (user_id, workspace_real_path, remote["id"]),
+            )
+            execute_db(
+                "UPDATE website_remote_connections SET directory_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (workspace_real_path, remote["id"]),
             )
             record_update_history(
                 user_id,
@@ -4841,7 +12330,7 @@ def run_site_terminal_command(user_id, command):
 
 
 @locked_site_operation
-def run_site_codex_update(user_id, prompt, suggested_image_path=None, provider=None, model=None):
+def run_site_codex_update(user_id, prompt, suggested_image_path=None, provider=None, model=None, selection=None):
     if not prompt:
         raise ValueError(translate("flash.codex_prompt_required"))
     provider, model = resolve_ai_provider_model(user_id, provider=provider, model=model)
@@ -4854,9 +12343,16 @@ def run_site_codex_update(user_id, prompt, suggested_image_path=None, provider=N
     if unsafe_symlink:
         raise ValueError(translate("site.unsafe_symlink", path=unsafe_symlink))
     snapshot_path = create_update_snapshot(user_id, workspace_path)
-    save_codex_message(user_id, "user", prompt, directory_path=workspace_path)
+    user_message = prompt
+    if selection:
+        user_message = (
+            f"{prompt}\n\n[Selected in preview: {selection.get('selector')} on {selection.get('page')}]"
+        )
+    save_codex_message(user_id, "user", user_message, directory_path=workspace_path)
     guarded_prompt = build_workspace_update_prompt(prompt, suggested_image_path)
-    result = run_site_ai_fallback_update(user_id, workspace_path, guarded_prompt, provider, model)
+    result = run_site_ai_fallback_update(
+        user_id, workspace_path, guarded_prompt, provider, model, selection=selection
+    )
     history_source = f"ai-direct:{provider}"
     reply = result.get("reply") or result.get("output") or ""
     after_manifest = build_workspace_manifest(workspace_path)
@@ -4896,9 +12392,14 @@ def run_site_codex_update(user_id, prompt, suggested_image_path=None, provider=N
     return result
 
 
-def run_site_ai_fallback_update(user_id, workspace_path, prompt, provider, model):
+def run_site_ai_fallback_update(user_id, workspace_path, prompt, provider, model, selection=None):
     site_context = collect_site_edit_context(workspace_path)
-    instruction = build_site_direct_edit_instruction(prompt, site_context)
+    workspace = get_workspace_for_path(user_id, os.path.realpath(workspace_path))
+    brand_context = brand_prompt_block(parse_site_brand(workspace["brand_json"])) if workspace else ""
+    instruction = build_site_direct_edit_instruction(
+        prompt, site_context, brand_context=brand_context,
+        selection_context=selection_prompt_block(selection),
+    )
     text, usage, resolved_model = run_ai_provider_prompt(user_id, provider, model, instruction)
     update_plan = parse_site_ai_update_plan(text)
     apply_site_ai_update_plan(workspace_path, update_plan)
@@ -4963,13 +12464,17 @@ def collect_site_edit_context(workspace_path, max_files=8, max_chars=24000):
     return selected
 
 
-def build_site_direct_edit_instruction(prompt, site_context):
+def build_site_direct_edit_instruction(prompt, site_context, brand_context="", selection_context=""):
     files_description = []
     for item in site_context:
         files_description.append(
             f"FILE: {item['path']}\n---BEGIN CONTENT---\n{item['content']}\n---END CONTENT---"
         )
     joined_files = "\n\n".join(files_description) or "(The workspace is empty. Create whatever the request needs.)"
+    brand_block = f"\n\n{brand_context.strip()}" if brand_context and brand_context.strip() else ""
+    selection_block = (
+        f"\n\n{selection_context.strip()}" if selection_context and selection_context.strip() else ""
+    )
     return f"""
 You are a file assistant working inside the user's connected workspace. You can create new files and edit existing ones: documents, notes, code, configs, web pages, or anything else the user asks for.
 
@@ -4992,7 +12497,7 @@ User request:
 {prompt}
 
 Existing files:
-{joined_files}
+{joined_files}{brand_block}{selection_block}
 """.strip()
 
 
@@ -5074,7 +12579,8 @@ User request:
 """.strip()
 
 
-def build_guided_seo_prompt(title, keyword, tone, audience, cta):
+def build_guided_seo_prompt(title, keyword, tone, audience, cta, brand_context=""):
+    brand_block = f"\n\n{brand_context.strip()}" if brand_context and brand_context.strip() else ""
     return f"""
 Create or update a website page using this guided SEO brief.
 
@@ -5088,7 +12594,7 @@ Requirements:
 - Match the existing website design and content structure.
 - Write useful, non-generic copy with headings, short sections, and a clear CTA.
 - Add or update internal navigation only if the site has an obvious pattern for it.
-- Keep all work inside the selected website directory.
+- Keep all work inside the selected website directory.{brand_block}
 """.strip()
 
 
@@ -5127,15 +12633,22 @@ def list_codex_messages(user_id):
         "UPDATE website_codex_messages SET directory_path = ? WHERE user_id = ? AND directory_path IS NULL",
         (current, user_id),
     )
-    return query_db(
-        """
-        SELECT id, role, content, exit_code, created_at
-        FROM website_codex_messages
-        WHERE user_id = ? AND directory_path = ?
-        ORDER BY id ASC
+    scope_ids = team_scope_user_ids(user_id)
+    if not scope_ids:
+        return []
+    placeholders = ", ".join("?" for _ in scope_ids)
+    rows = query_db(
+        f"""
+        SELECT m.id, m.role, m.content, m.exit_code, m.created_at,
+               u.name AS author_name, u.email AS author_email
+        FROM website_codex_messages m
+        LEFT JOIN users u ON u.id = m.user_id
+        WHERE m.user_id IN ({placeholders}) AND m.directory_path = ?
+        ORDER BY m.id ASC
         """,
-        (user_id, current),
+        (*scope_ids, current),
     )
+    return [dict(row) for row in rows]
 
 
 def record_update_history(
@@ -5180,15 +12693,22 @@ def list_update_history(user_id):
     if not directory:
         return []
     current_directory = os.path.realpath(directory["path"])
+    scope_ids = team_scope_user_ids(user_id)
+    if not scope_ids:
+        return []
+    placeholders = ", ".join("?" for _ in scope_ids)
     rows = query_db(
-        """
-        SELECT id, source, summary, exit_code, status, snapshot_path, changed_files, diff_summary, directory_path, created_at
-        FROM website_update_history
-        WHERE user_id = ?
-        ORDER BY created_at DESC, id DESC
-        LIMIT 20
+        f"""
+        SELECT h.id, h.source, h.summary, h.exit_code, h.status, h.snapshot_path, h.changed_files,
+               h.diff_summary, h.directory_path, h.created_at,
+               u.name AS author_name, u.email AS author_email
+        FROM website_update_history h
+        LEFT JOIN users u ON u.id = h.user_id
+        WHERE h.user_id IN ({placeholders})
+        ORDER BY h.created_at DESC, h.id DESC
+        LIMIT 60
         """,
-        (user_id,),
+        tuple(scope_ids),
     )
     updates = [format_update_history(row) for row in rows]
     return [
@@ -5196,7 +12716,7 @@ def list_update_history(user_id):
         for update in updates
         if update.get("directory_path")
         and os.path.realpath(update["directory_path"]) == current_directory
-    ]
+    ][:20]
 
 
 def format_update_history(row):
@@ -5212,8 +12732,8 @@ def format_update_history(row):
 def set_update_status(user_id, update_id, status):
     update = require_update_for_current_directory(user_id, update_id)
     execute_db(
-        "UPDATE website_update_history SET status = ? WHERE user_id = ? AND id = ?",
-        (status, user_id, update["id"]),
+        "UPDATE website_update_history SET status = ? WHERE id = ?",
+        (status, update["id"]),
     )
 
 
@@ -5222,13 +12742,20 @@ def get_update_history_item(user_id, update_id):
         update_id = int(update_id)
     except (TypeError, ValueError):
         return None
+    scope_ids = team_scope_user_ids(user_id)
+    if not scope_ids:
+        return None
+    placeholders = ", ".join("?" for _ in scope_ids)
     row = query_db(
-        """
-        SELECT id, user_id, source, summary, exit_code, status, snapshot_path, changed_files, diff_summary, directory_path, created_at
-        FROM website_update_history
-        WHERE user_id = ? AND id = ?
+        f"""
+        SELECT h.id, h.user_id, h.source, h.summary, h.exit_code, h.status, h.snapshot_path,
+               h.changed_files, h.diff_summary, h.directory_path, h.created_at,
+               u.name AS author_name, u.email AS author_email
+        FROM website_update_history h
+        LEFT JOIN users u ON u.id = h.user_id
+        WHERE h.user_id IN ({placeholders}) AND h.id = ?
         """,
-        (user_id, update_id),
+        (*scope_ids, update_id),
         one=True,
     )
     return format_update_history(row) if row else None
@@ -5981,6 +13508,20 @@ def build_ai_task_prompt(task_type, prompt, context=""):
             "avoid hashtags unless they clearly help. Return only the post text, with no quotes or preamble."
             f"\n\nUser request:\n{prompt.strip()}{context_block}"
         )
+    if task_type == "social_ideas":
+        return (
+            "Suggest social media post ideas based on the website context below (brand, pages, events). "
+            "Return 5 numbered ideas, one per line, each with a short title, a colon, and a one-sentence angle "
+            "that references real content from the site. No preamble, no extra commentary."
+            f"\n\nUser request:\n{prompt.strip()}{context_block}"
+        )
+    if task_type == "health_summary":
+        return (
+            "Explain these website issues in plain language for a non-technical site owner: "
+            "what each issue means, why it matters, and what the fix does. Keep it short, "
+            "grouped by page, with no code."
+            f"\n\nUser request:\n{prompt.strip()}{context_block}"
+        )
     return f"{prompt.strip()}{context_block}"
 
 
@@ -6285,17 +13826,36 @@ def list_buffer_channels(api_key):
     return channels
 
 
-def create_buffer_post(api_key, channel_id, text, draft=False, image_url=None):
+BUFFER_POST_TYPES = ("post", "story", "reel")
+BUFFER_TYPED_SERVICES = ("facebook", "instagram")
+
+
+def create_buffer_post(api_key, channel_id, text, draft=False, image_url=None, publish_now=False,
+                       post_type="post", channel_service=""):
     draft_flag = ", saveToDraft: true" if draft else ""
     assets_block = ""
     if image_url:
         assets_block = ", assets: [{ image: { url: %s } }]" % json.dumps(image_url)
+    mode_block = "mode: addToQueue"
+    if publish_now and not draft:
+        # Buffer rejects timestamps that are not in the future, and any "now"
+        # is already past when it arrives. +60s is the closest the API allows
+        # to an immediate publish.
+        due_now = (datetime.now(timezone.utc) + timedelta(seconds=60)).strftime(
+            "%Y-%m-%dT%H:%M:%S.000Z"
+        )
+        mode_block = f"mode: customScheduled, dueAt: {json.dumps(due_now)}"
+    metadata_block = ""
+    service = (channel_service or "").strip().lower()
+    if service in BUFFER_TYPED_SERVICES and post_type in BUFFER_POST_TYPES:
+        metadata_block = f", metadata: {{ {service}: {{ type: {post_type} }} }}"
     query = (
         "mutation CreateBufferPost { createPost(input: { text: %s, channelId: %s, "
-        "schedulingType: automatic, mode: addToQueue%s%s }) { "
+        "schedulingType: automatic, %s%s%s%s }) { "
         "... on PostActionSuccess { post { id text dueAt } } "
         "... on MutationError { message } } }"
-        % (json.dumps(text), json.dumps(channel_id), draft_flag, assets_block)
+        % (json.dumps(text), json.dumps(channel_id), mode_block, draft_flag, assets_block,
+           metadata_block)
     )
     data = buffer_graphql(api_key, query)
     result = data.get("createPost") or {}
@@ -6305,20 +13865,23 @@ def create_buffer_post(api_key, channel_id, text, draft=False, image_url=None):
     return {"id": post["id"], "text": post.get("text") or "", "due_at": post.get("dueAt") or ""}
 
 
-def record_social_post(user_id, channel_id, channel_name, text, status, buffer_post_id=None, image_url=None):
+def record_social_post(user_id, channel_id, channel_name, text, status, buffer_post_id=None,
+                      image_url=None, post_type="post"):
     execute_db(
         """
-        INSERT INTO social_posts (user_id, channel_id, channel_name, text, status, buffer_post_id, image_url)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO social_posts (user_id, channel_id, channel_name, text, status, buffer_post_id,
+                                  image_url, post_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (user_id, channel_id, channel_name, text, status, buffer_post_id, image_url),
+        (user_id, channel_id, channel_name, text, status, buffer_post_id, image_url, post_type),
     )
 
 
 def list_social_posts(user_id, limit=20):
     return query_db(
         """
-        SELECT id, channel_id, channel_name, text, status, buffer_post_id, image_url, created_at
+        SELECT id, channel_id, channel_name, text, status, buffer_post_id, image_url,
+               post_type, created_at
         FROM social_posts
         WHERE user_id = ?
         ORDER BY id DESC
@@ -6330,6 +13893,87 @@ def list_social_posts(user_id, limit=20):
 
 def social_image_directory():
     return os.path.join(UPLOAD_DIR, "social-images")
+
+
+def build_social_suggestions(user_id, max_items=6):
+    """Rule-based post ideas derived from the connected site (no AI key needed)."""
+    intelligence = build_site_intelligence(user_id)
+    if not intelligence.get("has_site"):
+        return {"has_site": False, "site_name": "", "suggestions": []}
+    brand = intelligence.get("brand") or {}
+    business = brand.get("business_name") or intelligence.get("site_name") or ""
+    suggestions = []
+
+    def _add(title, prompt):
+        if len(suggestions) < max_items and prompt:
+            suggestions.append({"title": title[:120], "prompt": prompt[:500]})
+
+    services = (brand.get("services") or "").strip()
+    if services:
+        first_service = re.split(r"[,;\n]", services)[0].strip()
+        _add(
+            f"Present: {first_service[:60]}" if first_service else "Present your services",
+            f"Announce {business + ': ' if business else ''}{first_service or services[:200]}"
+            " and invite people to learn more on our website.",
+        )
+    for page in (intelligence.get("pages") or [])[1:4]:
+        label = page.get("title") or page.get("heading") or ""
+        excerpt = (page.get("excerpt") or "")[:220]
+        if not label and not excerpt:
+            continue
+        _add(
+            f"Share page: {label[:60] or page['path']}",
+            f"Write a post inviting followers to visit the '{label or page['path']}' page"
+            + (f" ({excerpt})" if excerpt else "")
+            + ".",
+        )
+    for event in intelligence.get("upcoming_events") or []:
+        if not event.get("title"):
+            continue
+        _add(
+            f"Promote: {event['title'][:60]}",
+            f"Announce our upcoming {event.get('kind') or 'event'} '{event['title']}'"
+            + (f" starting {event['starts_on']}" if event.get("starts_on") else "")
+            + ".",
+        )
+    audience = (brand.get("audience") or "").strip()
+    if audience:
+        _add(
+            "Speak to your audience",
+            f"Write a helpful tip for {audience[:160]} related to what {business or 'we'} do.",
+        )
+    tagline = (brand.get("tagline") or "").strip()
+    if tagline:
+        _add(
+            "Brand message",
+            f"Turn this brand message into an engaging post: {tagline[:200]}",
+        )
+    return {
+        "has_site": True,
+        "site_name": intelligence.get("site_name") or "",
+        "suggestions": suggestions,
+    }
+
+
+def generate_social_ideas_with_ai(user_id, hint="", provider=None, model=None):
+    intelligence = build_site_intelligence(user_id)
+    if not intelligence.get("has_site"):
+        raise ValueError(translate("social.suggestions_empty"))
+    prompt = hint.strip() or "Suggest varied post ideas covering our services, pages, and events."
+    run = run_ai_text_task(user_id, "social_ideas", prompt, provider=provider, model=model)
+    ideas = []
+    for line in (run["response_text"] or "").splitlines():
+        cleaned = re.sub(r"^\s*(?:\d+[.)\-:]\s*|[-*•]\s*)", "", line).strip()
+        if not cleaned:
+            continue
+        if ":" in cleaned:
+            title = cleaned.split(":", 1)[0]
+            ideas.append({"title": title.strip()[:120], "prompt": cleaned[:500]})
+        else:
+            ideas.append({"title": cleaned[:120], "prompt": cleaned[:500]})
+        if len(ideas) >= 8:
+            break
+    return {"ideas": ideas, "provider": run["provider"]}
 
 
 def resolve_own_social_image(user_id, image_url):
@@ -6506,14 +14150,21 @@ def run_muse_image_edit(user_id, image_bytes, instruction, model=None, output_fo
     }
 
 
-def list_generated_images(user_id, limit=50):
+def list_generated_images(user_id, limit=50, workspace_id=None):
     directory = generated_image_directory()
     prefix = f"user-{user_id}-"
-    items = []
     try:
         entries = os.listdir(directory)
     except OSError:
         return []
+    known = {
+        row["filename"]: row
+        for row in query_db(
+            "SELECT filename, workspace_id, prompt FROM site_images WHERE user_id = ?",
+            (user_id,),
+        )
+    }
+    items = []
     for filename in entries:
         if not filename.startswith(prefix):
             continue
@@ -6524,12 +14175,26 @@ def list_generated_images(user_id, limit=50):
             continue
         if not os.path.isfile(image_path):
             continue
+        record = known.get(filename)
+        if record is None:
+            try:
+                execute_db(
+                    "INSERT INTO site_images (user_id, workspace_id, filename, prompt) VALUES (?, ?, ?, ?)",
+                    (user_id, None, filename, ""),
+                )
+            except sqlite3.IntegrityError:
+                pass
+            record = {"workspace_id": None, "prompt": ""}
+        if workspace_id is not None and (record["workspace_id"] or None) != workspace_id:
+            continue
         items.append(
             {
                 "filename": filename,
                 "url": f"/uploads/generated-images/{filename}",
                 "size_bytes": stat.st_size,
                 "created_at": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                "prompt": record["prompt"] or "",
+                "workspace_id": record["workspace_id"],
             }
         )
     items.sort(key=lambda item: item["filename"], reverse=True)
@@ -6631,9 +14296,22 @@ def run_ai_provider_prompt(user_id, provider, model, prompt):
     return text, usage, model
 
 
+SITE_INTELLIGENCE_TASKS = frozenset(
+    {"website_update", "seo_brief", "content_brief", "social_post", "social_ideas", "health_summary"}
+)
+
+
 def run_ai_text_task(user_id, task_type, prompt, provider=None, model=None, context=""):
     provider, model = resolve_ai_provider_model(user_id, provider=provider, model=model)
     final_prompt = build_ai_task_prompt(task_type, prompt, context=context)
+    if task_type.strip().lower() in SITE_INTELLIGENCE_TASKS:
+        intelligence_text = site_intelligence_prompt_block(user_id)
+        if intelligence_text:
+            final_prompt = f"{final_prompt}\n\n{intelligence_text}"
+        else:
+            brand_text = current_workspace_brand_text(user_id)
+            if brand_text:
+                final_prompt = f"{final_prompt}\n\n{brand_text}"
     text, usage, resolved_model = run_ai_provider_prompt(user_id, provider, model, final_prompt)
 
     save_ai_run(user_id, provider, resolved_model, task_type, final_prompt, response_text=text, usage=usage)
@@ -6842,14 +14520,20 @@ def list_site_backups(user_id):
     if not directory:
         return []
     current_directory = os.path.realpath(directory["path"])
+    scope_ids = team_scope_user_ids(user_id)
+    if not scope_ids:
+        return []
+    placeholders = ", ".join("?" for _ in scope_ids)
     rows = query_db(
-        """
-        SELECT id, directory_path, filename, backup_path, file_count, size_bytes, created_at
-        FROM website_backups
-        WHERE user_id = ?
-        ORDER BY created_at DESC, id DESC
+        f"""
+        SELECT b.id, b.directory_path, b.filename, b.backup_path, b.file_count, b.size_bytes,
+               b.created_at, u.name AS author_name, u.email AS author_email
+        FROM website_backups b
+        LEFT JOIN users u ON u.id = b.user_id
+        WHERE b.user_id IN ({placeholders})
+        ORDER BY b.created_at DESC, b.id DESC
         """,
-        (user_id,),
+        tuple(scope_ids),
     )
     return [
         format_site_backup(row)
@@ -6890,13 +14574,17 @@ def get_site_backup(user_id, backup_id):
     except (TypeError, ValueError):
         return None
 
+    scope_ids = team_scope_user_ids(user_id)
+    if not scope_ids:
+        return None
+    placeholders = ", ".join("?" for _ in scope_ids)
     return query_db(
-        """
+        f"""
         SELECT id, directory_path, filename, backup_path, file_count, size_bytes, created_at
         FROM website_backups
-        WHERE user_id = ? AND id = ?
+        WHERE user_id IN ({placeholders}) AND id = ?
         """,
-        (user_id, backup_id),
+        (*scope_ids, backup_id),
         one=True,
     )
 
@@ -7507,7 +15195,7 @@ def send_password_reset_email(user_id, recipient):
 def save_uploaded_image(user_id, upload, target_dir, prefix):
     filename = upload.filename or ""
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if extension not in {"png", "jpg", "jpeg", "gif", "webp"}:
+    if extension not in {"png", "jpg", "jpeg", "jfif", "gif", "webp"}:
         raise ValueError(translate("flash.avatar_invalid"))
     if not uploaded_image_matches_extension(upload, extension):
         raise ValueError(translate("flash.avatar_invalid"))
@@ -7535,6 +15223,7 @@ def uploaded_image_matches_extension(upload, extension):
         "png": header.startswith(b"\x89PNG\r\n\x1a\n"),
         "jpg": header.startswith(b"\xff\xd8\xff"),
         "jpeg": header.startswith(b"\xff\xd8\xff"),
+        "jfif": header.startswith(b"\xff\xd8\xff"),
         "gif": header.startswith((b"GIF87a", b"GIF89a")),
         "webp": header.startswith(b"RIFF") and header[8:12] == b"WEBP",
     }

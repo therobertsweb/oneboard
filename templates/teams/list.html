@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t("teams.title") }} | ONEBoard{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    {% include "partials/sidebar_brand.html" %}
+    {% set active_page = "teams" %}
+    {% include "partials/sidebar_nav.html" %}
+  </aside>
+
+  <main class="dashboard-main">
+    <header class="topbar">
+      <div>
+        <p class="page-kicker">{{ t("teams.kicker") }}</p>
+        <h1>{{ t("teams.title") }}</h1>
+        <p class="settings-note">{{ t("teams.subtitle") }}</p>
+      </div>
+      <div class="topbar-actions">
+        {% include "partials/user_chip.html" %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("nav.logout") }}</button>
+        </form>
+      </div>
+    </header>
+
+    {% include "partials/alerts.html" %}
+
+    {% if pending_invites %}
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("teams.invites") }}</h2>
+      </div>
+      <div class="table-responsive">
+        <table class="table seo-table align-middle">
+          <tbody>
+            {% for invite in pending_invites %}
+            <tr>
+              <td>
+                <strong>{{ invite.team_name }}</strong>
+                <div class="settings-note">{{ t("teams.role") }}: {{ t("teams.role_" + invite.role) }}</div>
+              </td>
+              <td class="text-end">
+                <form method="post" action="{{ url_for('team_invite_accept_id', invite_id=invite.id) }}">
+                  <button type="submit" class="btn btn-primary btn-sm">{{ t("teams.accept_own_invite") }}</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("teams.my_teams") }}</h2>
+      </div>
+      {% if teams %}
+      <div class="table-responsive">
+        <table class="table seo-table align-middle">
+          <thead>
+            <tr>
+              <th>{{ t("teams.name") }}</th>
+              <th>{{ t("teams.role") }}</th>
+              <th>{{ t("teams.members") }}</th>
+              <th>{{ t("teams.projects") }}</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for team in teams %}
+            <tr>
+              <td>
+                <strong>{{ team.name }}</strong>
+                {% if team.description %}
+                <div class="settings-note">{{ team.description }}</div>
+                {% endif %}
+              </td>
+              <td><span class="status-pill ok">{{ t("teams.role_" + team.my_role) }}</span></td>
+              <td>{{ team.member_count }}</td>
+              <td>{{ team.project_count }}</td>
+              <td class="text-end">
+                <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('team_detail', team_id=team.id) }}">{{ t("teams.open_project") }}</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state compact">{{ t("teams.no_teams") }}</div>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("teams.new_team") }}</h2>
+      </div>
+      <form method="post" action="{{ url_for('teams_list') }}" class="settings-form">
+        <div class="mb-3">
+          <label class="form-label" for="team_name">{{ t("teams.name") }}</label>
+          <input class="form-control" type="text" id="team_name" name="name" maxlength="80" placeholder="{{ t('teams.name_placeholder') }}" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="team_description">{{ t("teams.description") }}</label>
+          <input class="form-control" type="text" id="team_description" name="description" maxlength="500">
+        </div>
+        <button type="submit" class="btn btn-primary">{{ t("teams.create") }}</button>
+      </form>
+    </section>
+  </main>
+</div>
+{% endblock %}

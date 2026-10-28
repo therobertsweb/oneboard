@@ -32,6 +32,9 @@
         <h2>Search Console</h2>
         {% if gsc.connected and gsc.selected_site_url %}
         <p>{{ gsc.selected_site_url }}</p>
+        {% if gsc.site_scoped and gsc.site_name %}
+        <p class="settings-note">{{ t("dashboard.site_stats", site=gsc.site_name) }}</p>
+        {% endif %}
         {% elif gsc.connected %}
         <p>{{ t("dashboard.connected_select") }}</p>
         {% else %}

@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t("site.alerts") }} | ONEBoard{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    {% include "partials/sidebar_brand.html" %}
+    {% set active_page = "agency_alerts" %}
+    {% include "partials/sidebar_nav.html" %}
+  </aside>
+
+  <main class="dashboard-main">
+    <header class="topbar">
+      <div>
+        <p class="page-kicker"><a href="{{ url_for('site_manager') }}">{{ t("site.back_to_studio") }}</a></p>
+        <h1>{{ t("site.alerts") }}</h1>
+        <p class="settings-note">{{ t("alerts.continuous_note") }}</p>
+      </div>
+      <div class="topbar-actions">
+        {% include "partials/user_chip.html" %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("nav.logout") }}</button>
+        </form>
+      </div>
+    </header>
+
+    {% include "partials/alerts.html" %}
+    {% if team_context and not team_context.permissions.edit %}
+    <div class="alert alert-info">{{ t("teams.read_only") }}</div>
+    {% endif %}
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("alerts.rules") }}</h2>
+        {% if not team_context or team_context.permissions.edit %}
+        <form method="post" action="{{ url_for('agency_alerts_check') }}">
+          <button type="submit" class="btn btn-primary btn-sm">{{ t("alerts.check_now") }}</button>
+        </form>
+        {% endif %}
+      </div>
+      {% if not rules %}
+      <div class="empty-state compact">{{ t("alerts.no_rules") }}</div>
+      {% endif %}
+      {% for rule in rules %}
+      <div class="mb-2 pb-2 border-bottom">
+        <p>
+          <strong>{{ rule.name or ("#" ~ rule.id) }}</strong>
+          <span class="settings-note">{{ t("alerts.kind_" + rule.kind) if rule.kind != 'publish' else t("alerts.kind_publish") }} · {{ rule.target }}</span>
+          {% if rule.enabled %}
+          <span class="status-pill ok">{{ t("alerts.enable") }}</span>
+          {% else %}
+          <span class="status-pill muted">{{ t("alerts.disable") }}</span>
+          {% endif %}
+        </p>
+        {% if rule.last_detail %}
+        <p class="settings-note">{{ rule.last_status }}: {{ rule.last_detail }} ({{ rule.last_checked_at or "" }})</p>
+        {% endif %}
+        {% if not team_context or team_context.permissions.edit %}
+        <div class="d-flex gap-2 flex-wrap">
+          <form method="post" action="{{ url_for('agency_alert_rule_update', rule_id=rule.id) }}">
+            <input type="hidden" name="enabled" value="{{ '0' if rule.enabled else '1' }}">
+            <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("alerts.disable" if rule.enabled else "alerts.enable") }}</button>
+          </form>
+          <form method="post" action="{{ url_for('agency_alert_rule_delete', rule_id=rule.id) }}">
+            <button type="submit" class="btn btn-outline-danger btn-sm">{{ t("alerts.delete") }}</button>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+      {% if not team_context or team_context.permissions.edit %}
+      <form method="post" action="{{ url_for('agency_alert_rule_create') }}" class="settings-form mt-3">
+        <h3>{{ t("alerts.new_rule") }}</h3>
+        <div class="row g-2">
+          <div class="col-md-2">
+            <label class="form-label">{{ t("alerts.kind") }}</label>
+            <select class="form-select form-select-sm" name="kind">
+              <option value="uptime">{{ t("alerts.kind_uptime") }}</option>
+              <option value="tls">{{ t("alerts.kind_tls") }}</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">{{ t("alerts.target") }}</label>
+            <input class="form-control form-control-sm" type="text" name="target" maxlength="300" required>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">{{ t("alerts.name") }}</label>
+            <input class="form-control form-control-sm" type="text" name="name" maxlength="120">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">{{ t("alerts.threshold") }}</label>
+            <input class="form-control form-control-sm" type="number" name="threshold_days" value="14" min="1" max="365">
+          </div>
+        </div>
+        <div class="mt-2">
+          <button type="submit" class="btn btn-primary btn-sm">{{ t("alerts.create") }}</button>
+        </div>
+      </form>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("alerts.list") }}</h2>
+      </div>
+      {% if not alerts %}
+      <div class="empty-state compact">{{ t("alerts.no_alerts") }}</div>
+      {% endif %}
+      {% for alert in alerts %}
+      <div class="mb-2 pb-2 border-bottom">
+        <p>
+          <strong>{{ alert.title }}</strong>
+          <span class="status-pill {{ 'ok' if alert.status == 'resolved' else ('warn' if alert.status == 'open' else 'muted') }}">{{ t("alerts.status_" + alert.status) }}</span>
+        </p>
+        <p class="settings-note">{{ alert.detail }} · {{ alert.updated_at }}</p>
+        {% if alert.status != 'resolved' and (not team_context or team_context.permissions.edit) %}
+        <div class="d-flex gap-2 flex-wrap">
+          {% if alert.status == 'open' %}
+          <form method="post" action="{{ url_for('agency_alert_status', alert_id=alert.id) }}">
+            <input type="hidden" name="status" value="acked">
+            <button type="submit" class="btn btn-outline-primary btn-sm">{{ t("alerts.ack") }}</button>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('agency_alert_status', alert_id=alert.id) }}">
+            <input type="hidden" name="status" value="resolved">
+            <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("alerts.resolve") }}</button>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </section>
+  </main>
+</div>
+{% endblock %}

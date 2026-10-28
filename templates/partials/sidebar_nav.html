@@ -1,6 +1,17 @@
 <nav class="sidebar-nav">
+  {% set badges = nav_counts() %}
   <a class="{{ 'active' if active_page == 'dashboard' else '' }}" href="{{ url_for('dashboard') }}">{{ t("nav.dashboard") }}</a>
-  <a class="{{ 'active' if active_page == 'site_manager' else '' }}" href="{{ url_for('site_manager') }}">{{ t("nav.site_manager") }}</a>
+  <a class="{{ 'active' if active_page == 'notifications' else '' }}" href="{{ url_for('notifications_page') }}">🔔 {{ t("nav.notifications") }}{% if badges.notifications_unread %} <span class="nav-badge">{{ badges.notifications_unread }}</span>{% endif %}</a>
+  <a class="{{ 'active' if active_page == 'site_manager' and active_tab != 'preview' else '' }}" href="{{ url_for('site_manager') }}">{{ t("nav.site_manager") }}</a>
+  <a class="{{ 'active' if active_page == 'site_manager' and active_tab == 'preview' else '' }}" href="{{ url_for('site_manager', tab='preview') }}">{{ t("nav.preview") }}</a>
+  <a class="{{ 'active' if active_page == 'site_settings' else '' }}" href="{{ url_for('site_settings') }}">{{ t("nav.site") }}</a>
+  <a class="{{ 'active' if active_page == 'site_health' else '' }}" href="{{ url_for('site_health') }}">{{ t("nav.health") }}{% if badges.health_open %} <span class="nav-badge">{{ badges.health_open }}</span>{% endif %}</a>
+  <a class="{{ 'active' if active_page == 'agency_requests' else '' }}" href="{{ url_for('agency_requests') }}">{{ t("nav.requests") }}{% if badges.requests_open %} <span class="nav-badge">{{ badges.requests_open }}</span>{% endif %}</a>
+  <a class="{{ 'active' if active_page == 'agency_calendar' else '' }}" href="{{ url_for('agency_calendar') }}">{{ t("nav.calendar") }}</a>
+  <a class="{{ 'active' if active_page == 'agency_inbox' else '' }}" href="{{ url_for('agency_inbox') }}">{{ t("nav.inbox") }}{% if badges.inbox_new %} <span class="nav-badge">{{ badges.inbox_new }}</span>{% endif %}</a>
+  <a class="{{ 'active' if active_page == 'agency_alerts' else '' }}" href="{{ url_for('agency_alerts') }}">{{ t("nav.alerts") }}{% if badges.alerts_open %} <span class="nav-badge">{{ badges.alerts_open }}</span>{% endif %}</a>
+  <a class="{{ 'active' if active_page == 'agency_reports' else '' }}" href="{{ url_for('agency_reports') }}">{{ t("nav.reports") }}</a>
+  <a class="{{ 'active' if active_page == 'teams' else '' }}" href="{{ url_for('teams_list') }}">{{ t("nav.teams") }}</a>
   <a class="{{ 'active' if active_page == 'security_scan' else '' }}" href="{{ url_for('security_scan') }}">{{ t("nav.security_scan") }}</a>
   <a class="{{ 'active' if active_page == 'social' else '' }}" href="{{ url_for('social') }}">{{ t("nav.social") }}</a>
   <a class="{{ 'active' if active_page == 'help' else '' }}" href="{{ url_for('help_page') }}">{{ t("nav.help") }}</a>

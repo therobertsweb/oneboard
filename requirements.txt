@@ -3,3 +3,4 @@ Werkzeug==3.0.3
 gunicorn==22.0.0; platform_system != "Windows"
 waitress>=3.0,<4
 python-dotenv==1.0.1
+Pillow>=10,<13

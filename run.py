@@ -27,6 +27,13 @@ from app import app
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "check-alerts":
+        from app import run_all_alert_checks
+
+        with app.app_context():
+            checked = run_all_alert_checks()
+        print(f"Checked {checked} workspace(s) with enabled alert rules.")
+        sys.exit(0)
     host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "5002"))
     debug = os.environ.get("FLASK_DEBUG", "").lower() in {"1", "true", "yes"}

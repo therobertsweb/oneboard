@@ -198,7 +198,30 @@
             <dd>{{ google_config.redirect_uri }}</dd>
           </div>
         </dl>
-        <button type="submit" class="btn btn-primary">{{ t("settings.update") }}</button>
+        <p class="settings-note">{{ t("settings.register_note") }}</p>
+        <div id="googleUris"
+          data-diagnostics-url="{{ url_for('api_settings_google_diagnostics') }}"
+          data-copy="{{ t('settings.copy') }}"
+          data-copied="{{ t('settings.copied') }}"
+          data-msg-accepted="{{ t('settings.verify_ok') }}"
+          data-msg-mismatch="{{ t('settings.verify_mismatch') }}"
+          data-msg-invalid_client="{{ t('settings.verify_invalid_client') }}"
+          data-msg-network="{{ t('settings.verify_network') }}"
+          data-msg-unknown="{{ t('settings.verify_unknown') }}"
+          data-msg-missing_credentials="{{ t('settings.verify_missing') }}">
+          <p class="form-label">{{ t("settings.suggested_uris") }}</p>
+          {% for uri in google_config.suggested_uris %}
+          <div class="social-inline-row mb-2">
+            <code class="flex-grow-1">{{ uri }}</code>
+            <button type="button" class="btn btn-outline-secondary btn-sm google-copy-btn" data-uri="{{ uri }}">{{ t("settings.copy") }}</button>
+          </div>
+          <p class="social-hint google-uri-status" data-uri="{{ uri }}" role="status"></p>
+          {% endfor %}
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="googleVerifyBtn">{{ t("settings.verify_google") }}</button>
+        </div>
+        <div class="mt-3">
+          <button type="submit" class="btn btn-primary">{{ t("settings.update") }}</button>
+        </div>
       </section>
     </form>
   </main>
@@ -228,6 +251,50 @@
 
   bindPreview(input, preview, fallback);
   bindPreview(logoInput, logoPreview, logoFallback);
+
+  const urisBox = document.getElementById("googleUris");
+  if (urisBox) {
+    urisBox.querySelectorAll(".google-copy-btn").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const label = button.textContent;
+        try {
+          await navigator.clipboard.writeText(button.dataset.uri || "");
+          button.textContent = urisBox.dataset.copied;
+        } catch (error) {
+          button.textContent = button.dataset.uri || "";
+        }
+        setTimeout(() => { button.textContent = label; }, 1500);
+      });
+    });
+    const verifyBtn = document.getElementById("googleVerifyBtn");
+    if (verifyBtn) {
+      verifyBtn.addEventListener("click", async () => {
+        const label = verifyBtn.textContent;
+        verifyBtn.disabled = true;
+        urisBox.querySelectorAll(".google-uri-status").forEach((node) => {
+          node.textContent = "…";
+        });
+        try {
+          const response = await fetch(urisBox.dataset.diagnosticsUrl);
+          const data = await response.json();
+          if (!response.ok || !data.ok) throw new Error(data.error || "Request failed.");
+          (data.checks || []).forEach((check) => {
+            const node = urisBox.querySelector(`.google-uri-status[data-uri="${check.redirect_uri}"]`);
+            if (!node) return;
+            const key = "msg" + check.reason.charAt(0).toUpperCase() + check.reason.slice(1);
+            node.textContent = (check.google_accepts ? "✓ " : "✗ ") + (urisBox.dataset[key] || check.reason);
+          });
+        } catch (error) {
+          urisBox.querySelectorAll(".google-uri-status").forEach((node) => {
+            node.textContent = error.message;
+          });
+        } finally {
+          verifyBtn.disabled = false;
+          verifyBtn.textContent = label;
+        }
+      });
+    }
+  }
 })();
 </script>
 {% endblock %}

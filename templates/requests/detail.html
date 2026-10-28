@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}#{{ thread.id }} | ONEBoard{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    {% include "partials/sidebar_brand.html" %}
+    {% set active_page = "agency_requests" %}
+    {% include "partials/sidebar_nav.html" %}
+  </aside>
+
+  <main class="dashboard-main">
+    <header class="topbar">
+      <div>
+        <p class="page-kicker"><a href="{{ url_for('agency_requests') }}">{{ t("site.requests") }}</a></p>
+        <h1>#{{ thread.id }} — {{ thread.client_name or "—" }}</h1>
+        <p class="settings-note">{{ thread.created_at }}</p>
+      </div>
+      <div class="topbar-actions">
+        {% include "partials/user_chip.html" %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("nav.logout") }}</button>
+        </form>
+      </div>
+    </header>
+
+    {% include "partials/alerts.html" %}
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("req.status_" + thread.status) }}</h2>
+      </div>
+      <p>{{ thread.message }}</p>
+      {% if thread.selector %}
+      <p class="settings-note"><strong>{{ t("req.selected_element") }}:</strong> <code>{{ thread.selector }}</code> ({{ thread.page }})</p>
+      {% if thread.text %}
+      <p class="settings-note">"{{ thread.text[:200] }}"</p>
+      {% endif %}
+      {% elif thread.page %}
+      <p class="settings-note"><strong>{{ t("site.preview_path") }}:</strong> {{ thread.page }}</p>
+      {% endif %}
+      {% if thread.proposal_text %}
+      <div class="alert alert-info"><strong>{{ t("req.proposal") }}:</strong> {{ thread.proposal_text }}</div>
+      {% endif %}
+      {% if thread.attachments %}
+      <p><strong>{{ t("req.attachments") }}:</strong></p>
+      <div class="d-flex gap-2 flex-wrap">
+        {% for file in thread.attachments %}
+        <a href="{{ url_for('agency_request_attachment', filename=file.filename) }}" target="_blank" rel="noopener">{{ file.original_name }}</a>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if not team_context or team_context.permissions.edit %}
+      <div class="d-flex gap-2 flex-wrap mt-3">
+        <form method="post" action="{{ url_for('agency_request_status', request_id=thread.id) }}">
+          <input type="hidden" name="status" value="in_review">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("req.mark_review") }}</button>
+        </form>
+        <form method="post" action="{{ url_for('agency_request_status', request_id=thread.id) }}">
+          <input type="hidden" name="status" value="done">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("req.mark_done") }}</button>
+        </form>
+        <form method="post" action="{{ url_for('agency_request_status', request_id=thread.id) }}">
+          <input type="hidden" name="status" value="open">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("req.reopen_req") }}</button>
+        </form>
+        <form method="post" action="{{ url_for('agency_request_delete', request_id=thread.id) }}" onsubmit="return confirm({{ t('req.confirm_delete')|tojson }});">
+          <button type="submit" class="btn btn-outline-danger btn-sm">{{ t("req.delete") }}</button>
+        </form>
+      </div>
+      <form method="post" action="{{ url_for('agency_request_status', request_id=thread.id) }}" class="mt-3">
+        <input type="hidden" name="status" value="proposed">
+        <label class="form-label">{{ t("req.proposal") }}</label>
+        <textarea class="form-control form-control-sm" name="proposal" rows="2" maxlength="2000" placeholder="{{ t('req.proposal_placeholder') }}">{{ thread.proposal_text }}</textarea>
+        <button type="submit" class="btn btn-primary btn-sm mt-2">{{ t("req.propose") }}</button>
+      </form>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>{{ t("req.comments") }}</h2>
+      </div>
+      {% for comment in thread.comments %}
+      <div class="mb-2">
+        <p class="settings-note"><strong>{{ comment.author_name or ("team" if comment.side == "team" else "client") }}</strong> · {{ comment.created_at }}</p>
+        <p>{{ comment.body }}</p>
+      </div>
+      {% endfor %}
+      {% if not team_context or team_context.permissions.edit %}
+      <form method="post" action="{{ url_for('agency_request_comment', request_id=thread.id) }}" enctype="multipart/form-data" class="mt-2">
+        <textarea class="form-control form-control-sm" name="body" rows="2" maxlength="2000" required></textarea>
+        <div class="d-flex gap-2 mt-2 align-items-center">
+          <input class="form-control form-control-sm" type="file" name="attachment" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.pdf" style="max-width: 320px;">
+          <button type="submit" class="btn btn-primary btn-sm">{{ t("req.add_comment") }}</button>
+        </div>
+      </form>
+      {% endif %}
+    </section>
+  </main>
+</div>
+{% endblock %}

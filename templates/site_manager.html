@@ -7,6 +7,7 @@
   <aside class="sidebar">
     {% include "partials/sidebar_brand.html" %}
     {% set active_page = "site_manager" %}
+    {% set active_tab = tab %}
     {% include "partials/sidebar_nav.html" %}
   </aside>
 
@@ -26,11 +27,19 @@
 
     {% include "partials/alerts.html" %}
 
+    {% if manager.team_context %}
+    <div class="alert alert-info d-flex justify-content-between align-items-center">
+      <span>{{ t("teams.team_project") }}: <strong>{{ manager.team_context.team.name }}</strong> · {{ t("teams.role_" + manager.team_context.role) }}</span>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('team_detail', team_id=manager.team_context.team.id) }}">{{ t("teams.title") }}</a>
+    </div>
+    {% endif %}
+
     <section class="site-manager-app">
-    <nav class="site-manager-tabs" aria-label="{{ t('site.title') }}">
+    <nav class="site-manager-tabs" aria-label="{{ t('site.title') }}" data-active-tab="{{ tab }}">
       <button type="button" class="site-manager-tab active" data-site-tab="studio">{{ t("site.tab_studio") }}</button>
       <button type="button" class="site-manager-tab" data-site-tab="files" {% if not manager.files %}disabled{% endif %}>{{ t("site.tab_files") }}</button>
       <button type="button" class="site-manager-tab" data-site-tab="remote">{{ t("site.tab_remote") }}</button>
+      <button type="button" class="site-manager-tab" data-site-tab="preview" {% if not manager.directory %}disabled{% endif %}>{{ t("site.tab_preview") }}</button>
     </nav>
 
     <section class="site-command-center">
@@ -62,7 +71,7 @@
       <article class="site-status-card">
         <span class="overview-label">{{ t("site.backups") }}</span>
         <strong>{{ manager.backups|length }}</strong>
-        <form method="post" action="{{ url_for('site_manager_backup') }}" data-api-url="{{ url_for('api_site_manager_backup') }}" data-ajax-refresh>
+        <form method="post" action="{{ url_for('site_manager_backup') }}" data-api-url="{{ url_for('api_site_manager_backup') }}" data-ajax-refresh data-requires="edit">
           <button type="submit" class="btn btn-primary btn-sm" {% if not manager.directory %}disabled{% endif %}>
             {{ t("site.create_backup") }}
           </button>
@@ -82,7 +91,12 @@
     <section class="panel projects-panel" id="projectsPanel" data-connect-url="{{ url_for('api_site_manager_connect') }}" data-remove-url="{{ url_for('api_site_manager_remove_project') }}" data-confirm-remove="{{ t('site.confirm_remove_project') }}">
       <div class="panel-heading">
         <h2>{{ t("site.projects") }}</h2>
-        <button type="button" class="btn btn-primary btn-sm" id="newProjectBtn">{{ t("site.new_project") }}</button>
+        <div class="d-flex gap-2">
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('site_settings') }}">{{ t("site.site_settings") }}</a>
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('site_health') }}">{{ t("site.health") }}{% if manager.health.open_count %} ({{ manager.health.open_count }}){% endif %}</a>
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('agency_requests') }}">{{ t("site.requests") }}{% if manager.client_requests.open_count %} ({{ manager.client_requests.open_count }}){% endif %}</a>
+          <button type="button" class="btn btn-primary btn-sm" id="newProjectBtn">{{ t("site.new_project") }}</button>
+        </div>
       </div>
       <p class="settings-note">{{ t("site.projects_note") }}</p>
       {% if manager.projects %}
@@ -90,12 +104,18 @@
         {% for project in manager.projects %}
         <article class="project-row {{ 'active' if project.is_current else '' }}">
           <div class="project-info">
-            <strong>{{ project.name }}</strong>
+            <strong>{{ project.display_name }}</strong>
             <span class="project-path">{{ project.path }}</span>
           </div>
           <div class="project-badges">
             {% if project.is_current %}
             <span class="status-pill ok">{{ t("site.current_project") }}</span>
+            {% endif %}
+            {% if project.client_name %}
+            <span class="status-pill">{{ project.client_name }}</span>
+            {% endif %}
+            {% if project.scope == "team" %}
+            <span class="status-pill info">{{ t("teams.shared") }} · {{ project.team_name }}</span>
             {% endif %}
             {% if not project.exists %}
             <span class="status-pill warn">{{ t("site.project_missing") }}</span>
@@ -103,9 +123,11 @@
           </div>
           <div class="project-actions">
             {% if not project.is_current %}
-            <button type="button" class="btn btn-outline-secondary btn-sm" data-open-project="{{ project.path }}">{{ t("site.open_project") }}</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-open-project="{{ project.path }}" data-open-project-id="{{ project.id }}">{{ t("site.open_project") }}</button>
             {% endif %}
+            {% if project.scope != "team" or project.permissions.manage %}
             <button type="button" class="btn btn-outline-danger btn-sm" data-remove-project="{{ project.id }}">{{ t("site.remove_project") }}</button>
+            {% endif %}
           </div>
         </article>
         {% endfor %}
@@ -209,7 +231,7 @@
           </div>
           {% endif %}
         </section>
-        <form method="post" action="{{ url_for('site_manager_remote_connect') }}" data-api-url="{{ url_for('api_site_manager_remote_connect') }}" data-ajax-refresh class="remote-form">
+        <form method="post" action="{{ url_for('site_manager_remote_connect') }}" data-api-url="{{ url_for('api_site_manager_remote_connect') }}" data-ajax-refresh class="remote-form" data-requires="publish">
           <div>
             <label for="remote_host" class="form-label">{{ t("site.remote_host") }}</label>
             <input type="text" class="form-control" id="remote_host" name="host" value="{{ manager.remote_connection.host if manager.remote_connection else '' }}" placeholder="example.com" required>
@@ -244,7 +266,7 @@
           <button type="submit" class="btn btn-primary btn-sm">{{ t("site.remote_connect") }}</button>
         </form>
         {% if manager.remote_connection %}
-        <form method="post" action="{{ url_for('site_manager_remote_sync') }}" data-api-url="{{ url_for('api_site_manager_remote_sync') }}" data-ajax-refresh class="remote-sync-form">
+        <form method="post" action="{{ url_for('site_manager_remote_sync') }}" data-api-url="{{ url_for('api_site_manager_remote_sync') }}" data-ajax-refresh class="remote-sync-form" data-requires="publish">
           <button type="submit" class="btn btn-outline-secondary btn-sm">{{ t("site.remote_sync") }}</button>
           {% if manager.ssh_key.exists and manager.remote_connection.auth_method != "password" %}
           <p>{{ t("site.remote_sync_note") }}</p>
@@ -283,9 +305,10 @@
             </details>
             <form method="post" action="{{ url_for('site_manager_update_action') }}" class="update-actions">
               <input type="hidden" name="update_id" value="{{ update.id }}">
-              <button type="submit" name="action" value="approve" class="btn btn-outline-secondary btn-sm">{{ t("site.approve") }}</button>
-              <button type="submit" name="action" value="publish" class="btn btn-primary btn-sm">{{ t("site.publish") }}</button>
-              <button type="submit" name="action" value="restore" class="btn btn-outline-danger btn-sm" {% if not update.snapshot_path %}disabled{% endif %}>{{ t("site.restore_files") }}</button>
+              <button type="submit" name="action" value="approve" class="btn btn-outline-secondary btn-sm" data-requires="publish">{{ t("site.approve") }}</button>
+              <button type="submit" name="action" value="publish" class="btn btn-primary btn-sm" data-requires="publish">{{ t("site.publish") }}</button>
+              <button type="submit" name="action" value="restore" class="btn btn-outline-danger btn-sm" data-requires="edit" {% if not update.snapshot_path %}disabled{% endif %}>{{ t("site.restore_files") }}</button>
+              <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('site_manager_update_compare', update_id=update.id) }}">{{ t("site.compare") }}</a>
             </form>
           </article>
           {% endfor %}
@@ -339,7 +362,7 @@
           <span>{{ t("site.codex_working") }}</span>
         </div>
 
-        <div class="quick-action-bar">
+        <div class="quick-action-bar" data-requires="edit">
           <span>{{ t("site.quick_actions") }}</span>
           <button type="submit" form="codexUpdateForm" formnovalidate name="quick_prompt" value="{{ manager.quick_prompts.hero }}" class="btn btn-outline-secondary btn-sm">{{ t("site.quick_hero") }}</button>
           <button type="submit" form="codexUpdateForm" formnovalidate name="quick_prompt" value="{{ manager.quick_prompts.section }}" class="btn btn-outline-secondary btn-sm">{{ t("site.quick_section") }}</button>
@@ -347,7 +370,7 @@
           <button type="submit" form="codexUpdateForm" formnovalidate name="quick_prompt" value="{{ manager.quick_prompts.landing }}" class="btn btn-outline-secondary btn-sm">{{ t("site.quick_landing") }}</button>
         </div>
 
-        <form method="post" action="{{ url_for('site_manager_codex_update') }}" data-api-url="{{ url_for('api_site_manager_codex_update') }}" class="codex-update-form" id="codexUpdateForm" enctype="multipart/form-data">
+        <form method="post" action="{{ url_for('site_manager_codex_update') }}" data-api-url="{{ url_for('api_site_manager_codex_update') }}" class="codex-update-form" id="codexUpdateForm" enctype="multipart/form-data" data-requires="edit">
           {% if manager.selected_asset %}
           <input type="hidden" name="selected_asset" value="{{ manager.selected_asset }}">
           <div class="selected-asset-pill">{{ t("site.selected_asset") }}: {{ manager.selected_asset }}</div>
@@ -385,7 +408,7 @@
           <div class="panel-heading">
             <h2>{{ t("site.asset_library") }}</h2>
           </div>
-          <form method="post" action="{{ url_for('site_manager_asset_upload') }}" enctype="multipart/form-data" class="asset-upload-form">
+          <form method="post" action="{{ url_for('site_manager_asset_upload') }}" enctype="multipart/form-data" class="asset-upload-form" data-requires="edit">
             <label class="styled-file-upload">
               <span class="file-picker-button">{{ t("site.asset_upload") }}</span>
               <small class="file-picker-name" data-empty="{{ t('site.asset_empty') }}">{{ t("site.asset_empty") }}</small>
@@ -413,7 +436,7 @@
           <div class="panel-heading">
             <h2>{{ t("site.seo_writer") }}</h2>
           </div>
-          <form method="post" action="{{ url_for('site_manager_seo_content') }}" class="seo-writer-form">
+          <form method="post" action="{{ url_for('site_manager_seo_content') }}" class="seo-writer-form" data-requires="edit">
             <input class="form-control" type="text" name="title" placeholder="{{ t('site.seo_title') }}" {% if not manager.directory %}disabled{% endif %} required>
             <input class="form-control" type="text" name="keyword" placeholder="{{ t('site.seo_keyword') }}" {% if not manager.directory %}disabled{% endif %} required>
             <input class="form-control" type="text" name="tone" placeholder="{{ t('site.seo_tone') }}" {% if not manager.directory %}disabled{% endif %}>
@@ -431,6 +454,7 @@
             class="terminal-screen interactive-terminal"
             data-run-url="{{ url_for('site_manager_terminal_run') }}"
             data-ready="{{ t('site.terminal_ready') }}"
+            data-requires="edit"
             data-disabled="{{ 'true' if not manager.directory else 'false' }}"
           >
             <div class="terminal-meta">
@@ -464,7 +488,7 @@
                 <strong>{{ backup.filename }}</strong>
                 <span>{{ backup.created_at }} · {{ backup.size_label }} · {{ backup.file_count }} {{ t("site.files") }}</span>
               </div>
-              <form method="post" action="{{ url_for('site_manager_restore') }}" class="restore-form">
+              <form method="post" action="{{ url_for('site_manager_restore') }}" class="restore-form" data-requires="edit">
                 <input type="hidden" name="backup_id" value="{{ backup.id }}">
                 <label class="restore-confirm">
                   <input type="checkbox" name="confirm_restore" value="yes" required>
@@ -519,7 +543,7 @@
               {% if item.is_image %}
               <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('site_manager', asset=item.path) }}">{{ t("site.use_asset") }}</a>
               {% endif %}
-              <form method="post" action="{{ url_for('site_manager_file_delete') }}">
+              <form method="post" action="{{ url_for('site_manager_file_delete') }}" data-requires="edit">
                 <input type="hidden" name="path" value="{{ item.path }}">
                 <label class="delete-confirm">
                   <input type="checkbox" required>
@@ -551,10 +575,51 @@
       </div>
     </section>
     {% endif %}
+    <section class="panel preview-panel site-panel" data-site-panel="preview" hidden>
+      <div class="panel-heading">
+        <h2>{{ t("site.tab_preview") }}</h2>
+        <div class="d-flex gap-2" role="group" aria-label="device">
+          <button type="button" class="btn btn-outline-secondary btn-sm preview-device active" data-device="desktop">{{ t("site.preview_desktop") }}</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm preview-device" data-device="mobile">{{ t("site.preview_mobile") }}</button>
+        </div>
+      </div>
+      {% if manager.directory %}
+      <div class="d-flex gap-2 flex-wrap align-items-end mb-2" id="previewControls"
+        data-preview-base="{{ url_for('site_manager_preview_index') }}"
+        data-select-url="{{ url_for('api_preview_select') }}"
+        data-codex-url="{{ url_for('api_site_manager_codex_update') }}"
+        data-select-label="{{ t('site.preview_select') }}"
+        data-selecting-label="{{ t('site.preview_selecting') }}">
+        <div>
+          <label class="form-label" for="previewPath">{{ t("site.preview_path") }}</label>
+          <input class="form-control form-control-sm" type="text" id="previewPath" value="index.html" style="min-width: 220px;">
+        </div>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="previewOpenBtn">{{ t("site.preview_open") }}</button>
+        <button type="button" class="btn btn-outline-primary btn-sm" id="previewSelectBtn">{{ t("site.preview_select") }}</button>
+      </div>
+      <p class="settings-note">{{ t("site.preview_select_hint") }}</p>
+      <iframe id="previewFrame" title="{{ t('site.tab_preview') }}" class="preview-frame" src="{{ url_for('site_manager_preview_file', filepath='index.html') }}?picker=1"></iframe>
+      <div id="previewSelection" class="mt-2" hidden>
+        <p><strong>{{ t("site.preview_selected") }}:</strong> <code id="previewSelectionLabel"></code></p>
+        <div class="d-flex gap-2 flex-wrap align-items-end">
+          <div class="flex-grow-1">
+            <input class="form-control form-control-sm" type="text" id="previewPrompt" placeholder="{{ t('site.preview_prompt_placeholder') }}">
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" id="previewApplyBtn" data-requires="edit">{{ t("site.preview_apply") }}</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="previewClearBtn">{{ t("site.preview_clear") }}</button>
+        </div>
+      </div>
+      <div id="previewNoSelection" class="mt-2">
+        <p class="settings-note">{{ t("site.preview_no_selection") }}</p>
+      </div>
+      {% else %}
+      <div class="empty-state compact">{{ t("site.not_connected") }}</div>
+      {% endif %}
+    </section>
     </div>
     </section>
 
-    <form method="post" action="{{ url_for('site_manager_terminal') }}" class="terminal-form fallback-terminal-form">
+    <form method="post" action="{{ url_for('site_manager_terminal') }}" class="terminal-form fallback-terminal-form" data-requires="edit">
       <label for="command" class="form-label">{{ t("site.command") }}</label>
       <div class="terminal-row">
         <input
@@ -633,6 +698,15 @@
       });
     });
   });
+
+  const tabsNav = document.querySelector(".site-manager-tabs");
+  const requestedTab = tabsNav ? tabsNav.dataset.activeTab : "studio";
+  if (requestedTab && requestedTab !== "studio") {
+    const target = Array.from(siteTabs).find(
+      (item) => item.dataset.siteTab === requestedTab && !item.disabled
+    );
+    if (target) target.click();
+  }
 
   document.querySelectorAll("form[data-ajax-refresh]").forEach((form) => {
     form.addEventListener("submit", async (event) => {
@@ -904,7 +978,11 @@
       let url;
       if (openBtn) {
         url = projectsPanel.dataset.connectUrl;
-        formData.append("path", openBtn.dataset.openProject);
+        if (openBtn.dataset.openProjectId) {
+          formData.append("project_id", openBtn.dataset.openProjectId);
+        } else {
+          formData.append("path", openBtn.dataset.openProject);
+        }
       } else {
         if (!window.confirm(projectsPanel.dataset.confirmRemove)) return;
         url = projectsPanel.dataset.removeUrl;
@@ -923,6 +1001,122 @@
         alert(error.message);
         if (openBtn) openBtn.disabled = false;
         if (removeBtn) removeBtn.disabled = false;
+      }
+    });
+  }
+
+  const previewControls = document.getElementById("previewControls");
+  const previewFrame = document.getElementById("previewFrame");
+  const initialSelection = {{ manager.preview_selection | tojson }};
+  if (previewControls && previewFrame) {
+    const pathInput = document.getElementById("previewPath");
+    const openBtn = document.getElementById("previewOpenBtn");
+    const selectBtn = document.getElementById("previewSelectBtn");
+    const selectionBox = document.getElementById("previewSelection");
+    const selectionLabel = document.getElementById("previewSelectionLabel");
+    const noSelectionBox = document.getElementById("previewNoSelection");
+    const promptInput = document.getElementById("previewPrompt");
+    const applyBtn = document.getElementById("previewApplyBtn");
+    const clearBtn = document.getElementById("previewClearBtn");
+    let selecting = false;
+
+    function previewUrl() {
+      const path = (pathInput.value || "index.html").replace(/^\/+/, "");
+      return `${previewControls.dataset.previewBase}/${path}?picker=1`;
+    }
+    function setSelecting(value) {
+      selecting = value;
+      selectBtn.textContent = selecting ? previewControls.dataset.selectingLabel : previewControls.dataset.selectLabel;
+      selectBtn.classList.toggle("active", selecting);
+      if (previewFrame.contentWindow) {
+        previewFrame.contentWindow.postMessage({ type: "oneboard-picker-toggle", active: selecting }, window.location.origin);
+      }
+    }
+    function showSelection(selection) {
+      if (!selection) {
+        selectionBox.hidden = true;
+        noSelectionBox.hidden = false;
+        return;
+      }
+      selectionLabel.textContent = `${selection.selector}${selection.text ? " — " + selection.text.slice(0, 80) : ""}`;
+      selectionBox.hidden = false;
+      noSelectionBox.hidden = true;
+    }
+    openBtn.addEventListener("click", () => { previewFrame.src = previewUrl(); });
+    pathInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); previewFrame.src = previewUrl(); }
+    });
+    selectBtn.addEventListener("click", () => setSelecting(!selecting));
+    previewFrame.addEventListener("load", () => {
+      if (selecting && previewFrame.contentWindow) {
+        previewFrame.contentWindow.postMessage({ type: "oneboard-picker-toggle", active: true }, window.location.origin);
+      }
+    });
+    window.addEventListener("message", async (event) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data || {};
+      if (data.type !== "oneboard-selection" || !data.selection) return;
+      setSelecting(false);
+      try {
+        const response = await fetch(previewControls.dataset.selectUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data.selection),
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) throw new Error(payload.error || "Request failed.");
+        showSelection(payload.selection);
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+    clearBtn.addEventListener("click", async () => {
+      try {
+        await fetch(previewControls.dataset.selectUrl, { method: "DELETE" });
+      } catch (error) {
+        /* selection clearing is best-effort */
+      }
+      showSelection(null);
+    });
+    applyBtn.addEventListener("click", async () => {
+      const prompt = (promptInput.value || "").trim();
+      if (!prompt) { promptInput.focus(); return; }
+      applyBtn.disabled = true;
+      try {
+        const response = await fetch(previewControls.dataset.codexUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt }),
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) throw new Error(payload.error || "Request failed.");
+        window.location.reload();
+      } catch (error) {
+        alert(error.message);
+        applyBtn.disabled = false;
+      }
+    });
+    document.querySelectorAll(".preview-device").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".preview-device").forEach((item) => item.classList.toggle("active", item === button));
+        previewFrame.dataset.device = button.dataset.device;
+      });
+    });
+    showSelection(initialSelection);
+  }
+
+  const teamContext = {{ manager.team_context | tojson }};
+  const teamReadOnly = {{ t("teams.read_only") | tojson }};
+  if (teamContext && teamContext.permissions) {
+    document.querySelectorAll("[data-requires]").forEach((guarded) => {
+      if (!teamContext.permissions[guarded.dataset.requires]) {
+        guarded.querySelectorAll("button, input, select, textarea").forEach((field) => {
+          field.disabled = true;
+        });
+        if (guarded.matches("button, input, select, textarea")) {
+          guarded.disabled = true;
+        }
+        guarded.setAttribute("title", teamReadOnly);
       }
     });
   }
