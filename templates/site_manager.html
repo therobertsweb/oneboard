@@ -601,7 +601,7 @@
         <button type="button" class="btn btn-outline-primary btn-sm" id="previewSelectBtn">{{ t("site.preview_select") }}</button>
       </div>
       <p class="settings-note">{{ t("site.preview_select_hint") }}</p>
-      <iframe id="previewFrame" title="{{ t('site.tab_preview') }}" class="preview-frame" src="{{ url_for('site_manager_preview_file', filepath='index.html') }}?picker=1"></iframe>
+      <iframe id="previewFrame" sandbox="allow-scripts" title="{{ t('site.tab_preview') }}" class="preview-frame" src="{{ url_for('site_manager_preview_file', filepath='index.html') }}?picker=1"></iframe>
       <div id="previewSelection" class="mt-2" hidden>
         <p><strong>{{ t("site.preview_selected") }}:</strong> <code id="previewSelectionLabel"></code></p>
         <div class="d-flex gap-2 flex-wrap align-items-end">
@@ -1048,7 +1048,7 @@
       selectBtn.textContent = selecting ? previewControls.dataset.selectingLabel : previewControls.dataset.selectLabel;
       selectBtn.classList.toggle("active", selecting);
       if (previewFrame.contentWindow) {
-        previewFrame.contentWindow.postMessage({ type: "oneboard-picker-toggle", active: selecting }, window.location.origin);
+        previewFrame.contentWindow.postMessage({ type: "oneboard-picker-toggle", active: selecting }, "*");
       }
     }
     function showSelection(selection) {
@@ -1068,11 +1068,11 @@
     selectBtn.addEventListener("click", () => setSelecting(!selecting));
     previewFrame.addEventListener("load", () => {
       if (selecting && previewFrame.contentWindow) {
-        previewFrame.contentWindow.postMessage({ type: "oneboard-picker-toggle", active: true }, window.location.origin);
+        previewFrame.contentWindow.postMessage({ type: "oneboard-picker-toggle", active: true }, "*");
       }
     });
     window.addEventListener("message", async (event) => {
-      if (event.origin !== window.location.origin) return;
+      if (event.source !== previewFrame.contentWindow || event.origin !== "null") return;
       const data = event.data || {};
       if (data.type !== "oneboard-selection" || !data.selection) return;
       setSelecting(false);
@@ -1080,7 +1080,7 @@
         const response = await fetch(previewControls.dataset.selectUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data.selection),
+          body: JSON.stringify({...data.selection, expected_directory_path: {{ manager.directory.path|tojson if manager.directory else '""' }}}),
         });
         const payload = await response.json();
         if (!response.ok || !payload.ok) throw new Error(payload.error || "Request failed.");
@@ -1105,7 +1105,7 @@
         const response = await fetch(previewControls.dataset.codexUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify({ prompt, expected_directory_path: {{ manager.directory.path|tojson if manager.directory else '""' }} }),
         });
         const payload = await response.json();
         if (!response.ok || !payload.ok) throw new Error(payload.error || "Request failed.");

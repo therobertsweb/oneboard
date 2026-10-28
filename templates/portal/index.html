@@ -19,7 +19,7 @@
       <button type="button" class="btn btn-outline-primary btn-sm" id="portalAnnotateBtn">{{ t("portal.annotate") }}</button>
     </div>
     <p class="settings-note">{{ t("portal.annotate_hint") }}</p>
-    <iframe id="portalFrame" class="preview-frame" title="{{ t('portal.title') }}"
+    <iframe id="portalFrame" sandbox="allow-scripts" class="preview-frame" title="{{ t('portal.title') }}"
       src="{{ url_for('portal_preview_file', token=token, filepath='index.html') }}?picker=1"></iframe>
     <div id="portalSelection" class="mt-2" hidden>
       <p><strong>{{ t("req.selected_element") }}:</strong> <code id="portalSelectionLabel"></code></p>
@@ -97,12 +97,12 @@
     annotating = !annotating;
     annotateBtn.classList.toggle("active", annotating);
     if (frame.contentWindow) {
-      frame.contentWindow.postMessage({ type: "oneboard-picker-toggle", active: annotating }, window.location.origin);
+      frame.contentWindow.postMessage({ type: "oneboard-picker-toggle", active: annotating }, "*");
     }
   });
 
   window.addEventListener("message", (event) => {
-    if (event.origin !== window.location.origin) return;
+    if (event.source !== frame.contentWindow || event.origin !== "null") return;
     const data = event.data || {};
     if (data.type !== "oneboard-selection" || !data.selection) return;
     annotating = false;

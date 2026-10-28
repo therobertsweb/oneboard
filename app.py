@@ -39,6 +39,7 @@ from flask import (
     flash,
     g,
     has_request_context,
+    has_app_context,
     jsonify,
     redirect,
     render_template,
@@ -50,6 +51,7 @@ from flask import (
     url_for,
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.exceptions import BadRequest, HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
 
@@ -1872,15 +1874,23 @@ def translate(key, **kwargs):
 
 @contextmanager
 def site_operation_lock(user_id):
-    lock_key = str(user_id)
+    lock_keys = [f"user:{user_id}"]
+    if has_app_context():
+        directory = get_site_directory(user_id)
+        if directory:
+            lock_keys.append(f"directory:{os.path.realpath(directory['path'])}")
     with SITE_OPERATION_LOCKS_GUARD:
-        lock = SITE_OPERATION_LOCKS.setdefault(lock_key, threading.RLock())
-    if not lock.acquire(blocking=False):
-        raise ValueError(translate("site.operation_in_progress"))
+        locks = [SITE_OPERATION_LOCKS.setdefault(key, threading.RLock()) for key in lock_keys]
+    acquired = []
     try:
+        for lock in locks:
+            if not lock.acquire(blocking=False):
+                raise ValueError(translate("site.operation_in_progress"))
+            acquired.append(lock)
         yield
     finally:
-        lock.release()
+        for lock in reversed(acquired):
+            lock.release()
 
 
 def locked_site_operation(function):
@@ -1930,6 +1940,7 @@ def create_app():
     )
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
     app.config["MAX_CONTENT_LENGTH"] = MAX_IMAGE_UPLOAD_BYTES + (1024 * 1024)
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["NATIVE_SERVICE_TOKEN"] = os.environ.get("ONEBOARD_SERVICE_TOKEN", "")
     # Trust one reverse proxy (cloudflared, nginx, ...) so url_for(_external=True)
     # and request.url reflect the public https host. Required for the Google
@@ -1941,6 +1952,8 @@ def create_app():
 
     @app.before_request
     def load_request_context():
+        g.user = None
+        g.lang = session.get("lang", DEFAULT_LANGUAGE)
         native_service_token = app.config["NATIVE_SERVICE_TOKEN"]
         if (
             native_service_token
@@ -1976,6 +1989,59 @@ def create_app():
                 (user_id,),
                 one=True,
             )
+
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            # Public contact tokens intentionally accept submissions from client sites.
+            public_contact = request.endpoint == "public_form_submit"
+            if not public_contact:
+                origin = request.headers.get("Origin")
+                if (origin and origin.rstrip("/") != request.host_url.rstrip("/")) or request.headers.get("Sec-Fetch-Site") == "cross-site":
+                    abort(403, description="This action must be sent from ONEBoard.")
+            if request.is_json:
+                payload = request.get_json()
+                validate_json_payload(payload)
+            if g.user and request.path.startswith(("/site-manager", "/api/site-manager")):
+                guard = site_operation_lock(g.user["id"])
+                try:
+                    guard.__enter__()
+                    g.workspace_guard = guard
+                    validate_expected_site_directory(g.user["id"], request_payload().get("expected_directory_path"))
+                except (ValueError, TeamAccessDenied) as error:
+                    if request.path.startswith("/api/"):
+                        return api_error(str(error), 400)
+                    flash(str(error), "warning")
+                    return redirect(url_for("site_manager"))
+
+    @app.teardown_request
+    def release_workspace_guard(error=None):
+        guard = g.pop("workspace_guard", None)
+        if guard is not None:
+            guard.__exit__(None, None, None)
+
+    @app.errorhandler(HTTPException)
+    def http_error(error):
+        if request.path.startswith("/api/"):
+            response = error.get_response()
+            response.data = json.dumps({"ok": False, "error": error.description})
+            response.content_type = "application/json"
+            return response
+        return error
+
+    @app.after_request
+    def response_boundaries(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        if g.get("user") or request.path.startswith(("/api/", "/r/", "/reports/")):
+            response.headers["Cache-Control"] = "no-store"
+        # Enforce sandboxing even when a preview/raw HTML URL is opened directly.
+        preview_endpoints = {
+            "site_manager_preview_file", "portal_preview_file", "site_manager_update_before_file",
+            "site_manager_file_raw", "api_site_manager_file_raw", "site_manager_asset_raw",
+            "api_site_manager_asset_raw",
+        }
+        if request.endpoint in preview_endpoints:
+            response.headers["Content-Security-Policy"] = "sandbox allow-scripts; form-action 'none'"
+        return response
 
     @app.context_processor
     def inject_template_helpers():
@@ -2615,7 +2681,7 @@ def create_app():
                 image_path = selected_asset or uploaded_asset
                 if selected_asset:
                     validate_asset_path(g.user["id"], selected_asset)
-                selection = session.get(PREVIEW_SELECTION_KEY)
+                selection = current_preview_selection(g.user["id"])
                 terminal = run_site_codex_update(g.user["id"], prompt, image_path, provider=provider, model=model, selection=selection)
                 session.pop(PREVIEW_SELECTION_KEY, None)
         except TeamAccessDenied as error:
@@ -5381,7 +5447,7 @@ def create_app():
             image_path = selected_asset or save_codex_suggested_image(g.user["id"], suggested_image)
             if selected_asset:
                 validate_asset_path(g.user["id"], selected_asset)
-            selection = session.get(PREVIEW_SELECTION_KEY)
+            selection = current_preview_selection(g.user["id"])
             terminal = run_site_codex_update(g.user["id"], prompt, image_path, selection=selection)
             session.pop(PREVIEW_SELECTION_KEY, None)
         except ValueError as error:
@@ -5851,6 +5917,35 @@ def execute_db(query, args=()):
 
 def api_error(message, status=400):
     return jsonify({"ok": False, "error": str(message)}), status
+
+
+def validate_json_payload(payload):
+    if not isinstance(payload, dict):
+        raise BadRequest("Send a JSON object with named fields.")
+    text_fields = {
+        "action", "alt", "audience", "auth_method", "buffer_api_key", "channel_id",
+        "client_name", "command", "company_email", "company_name", "company_website",
+        "context", "cta", "domain", "email", "hint", "host", "html", "image_prompt",
+        "image_src", "image_url", "instruction", "key_path", "keyword", "message",
+        "model", "name", "output_format", "page", "path", "phone", "post_type", "prompt",
+        "provider", "quick_prompt", "remote_path", "selected_asset", "selector", "site_url",
+        "tag", "task_type", "text", "title", "token", "tone", "username", "password",
+        "confirm_password", "current_password", "new_password", "confirm_new_password",
+        "expected_directory_path", "language", "role", "period", "kind", "status", "brief",
+        "starts_on", "ends_on", "display_name", "gsc_property", "description", "label",
+    }
+    for key in text_fields & payload.keys():
+        value = payload[key]
+        if value is not None and (not isinstance(value, str) or "\x00" in value):
+            raise BadRequest(f"Field '{key}' must be text without null characters.")
+    for key in ("draft", "publish_now"):
+        if key in payload and not isinstance(payload[key], bool):
+            raise BadRequest(f"Field '{key}' must be true or false.")
+    for key in ("channel_ids", "finding_ids"):
+        if key in payload and payload[key] is not None:
+            value = payload[key]
+            if not isinstance(value, list) or any(type(item) not in (str, int) for item in value):
+                raise BadRequest(f"Field '{key}' must be a list of identifiers.")
 
 
 def request_payload():
@@ -7237,7 +7332,7 @@ def build_site_manager(user_id):
         "directory": directory,
         "directory_managed_by_env": False,
         "team_context": current_team_context(user_id),
-        "preview_selection": session.get(PREVIEW_SELECTION_KEY) if has_request_context() else None,
+        "preview_selection": current_preview_selection(user_id) if has_request_context() else None,
         "health": get_health_summary(user_id),
         "client_requests": {"open_count": count_open_client_requests(user_id)},
         "projects": list_site_projects(user_id),
@@ -7253,7 +7348,6 @@ def build_site_manager(user_id):
     }
 
 
-@locked_site_operation
 def validate_site_directory_selection(normalized_path):
     app_data_path = os.path.realpath(APP_DATA_DIR)
     home_path = os.path.realpath(os.path.expanduser("~"))
@@ -7272,6 +7366,7 @@ def clean_manual_directory_path(path):
     return cleaned.replace("\\ ", " ")
 
 
+@locked_site_operation
 def connect_site_directory(user_id, path):
     cleaned_path = clean_manual_directory_path(path)
     if not cleaned_path:
@@ -8764,6 +8859,15 @@ PREVIEW_SELECTION_KEY = "preview_selection"
 PREVIEW_IMAGE_EXTENSIONS = {".gif", ".ico", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
 
 
+def current_preview_selection(user_id):
+    selection = session.get(PREVIEW_SELECTION_KEY)
+    directory = get_site_directory(user_id)
+    if not isinstance(selection, dict) or not directory or selection.get("directory_path") != os.path.realpath(directory["path"]):
+        session.pop(PREVIEW_SELECTION_KEY, None)
+        return None
+    return selection
+
+
 def clean_preview_selection(user_id, payload):
     payload = payload or {}
     page = str(payload.get("page") or "").replace("\\", "/").strip().strip("/")[:300]
@@ -8777,6 +8881,7 @@ def clean_preview_selection(user_id, payload):
     if not os.path.isfile(absolute_path):
         raise ValueError(translate("site.file_missing"))
     return {
+        "directory_path": os.path.realpath(require_site_directory(user_id)["path"]),
         "page": page,
         "selector": selector,
         "tag": str(payload.get("tag") or "").strip()[:40],
@@ -8811,14 +8916,14 @@ def selection_prompt_block(selection):
 
 
 def inject_preview_picker(html_text, page=""):
-    hint = translate("site.preview_picker_hint").replace('"', "")
-    safe_page = (page or "").replace("\\", "/").strip().strip("/").replace('"', "")
+    hint = html.escape(translate("site.preview_picker_hint"), quote=True)
+    safe_page = html.escape((page or "").replace("\\", "/").strip().strip("/"), quote=True)
     tag = (
         f'<script id="oneboard-picker" src="/static/js/preview-picker.js"'
         f' data-hint="{hint}" data-page="{safe_page}" data-active="0"></script>'
     )
     if re.search(r"</body\s*>", html_text, re.IGNORECASE):
-        return re.sub(r"</body\s*>", f"{tag}</body>", html_text, count=1, flags=re.IGNORECASE)
+        return re.sub(r"</body\s*>", lambda _match: f"{tag}</body>", html_text, count=1, flags=re.IGNORECASE)
     return f"{html_text}{tag}"
 
 
@@ -9827,7 +9932,7 @@ def run_ai_health_fix(user_id, finding_ids=None, provider=None, model=None):
     try:
         plan = parse_site_ai_update_plan(text)
         apply_site_ai_update_plan(real_path, plan)
-    except ValueError as error:
+    except (ValueError, OSError, UnicodeError) as error:
         try:
             restore_workspace_changes(
                 real_path,
@@ -9840,7 +9945,7 @@ def run_ai_health_fix(user_id, finding_ids=None, provider=None, model=None):
             user_id, provider, resolved_model, "health_fix", instruction,
             response_text=text, status="failed", error_text=str(error), usage=usage,
         )
-        raise error
+        raise ValueError(str(error)) from error
     save_ai_run(
         user_id, provider, resolved_model, "health_fix", instruction,
         response_text=text, usage=usage,
@@ -10085,6 +10190,16 @@ def resolve_link_page(link, page):
     if not candidate or candidate.startswith("/") or contains_parent_reference(candidate):
         return None
     if relative_path_has_reserved_component(candidate):
+        return None
+    public_extensions = {
+        ".html", ".htm", ".css", ".js", ".mjs", ".png", ".jpg", ".jpeg", ".gif",
+        ".webp", ".avif", ".svg", ".ico", ".woff", ".woff2", ".ttf", ".otf",
+        ".mp4", ".webm", ".mp3", ".wav", ".pdf",
+    }
+    if posixpath.splitext(candidate)[1].lower() not in public_extensions:
+        return None
+    root = os.path.realpath(link["workspace_path"])
+    if path_contains_symlink(root, os.path.abspath(os.path.join(root, candidate))):
         return None
     absolute_path = os.path.realpath(os.path.join(link["workspace_path"], *candidate.split("/")))
     root = os.path.realpath(link["workspace_path"])
@@ -10578,6 +10693,7 @@ def delete_calendar_event(user_id, event_id):
     execute_db("DELETE FROM scheduled_events WHERE id = ?", (event_id,))
 
 
+@locked_site_operation
 def execute_calendar_event(user_id, event_id):
     workspace = require_current_request_workspace(user_id)
     require_project_permission(user_id, "edit")
@@ -10592,6 +10708,8 @@ def execute_calendar_event(user_id, event_id):
     )
     if not row:
         raise ValueError(translate("flash.event_not_found"))
+    if row["status"] in {"done", "cancelled"}:
+        raise ValueError(translate("flash.invalid_transition"))
     brief = (row["brief"] or "").strip()
     if not brief:
         raise ValueError(translate("flash.fix_value_required"))
@@ -11219,7 +11337,8 @@ def build_site_report(user_id, workspace, period):
     site_property = workspace["gsc_property"] or ""
     try:
         visits = fetch_search_console_totals(
-            connection, site_property or "", start[:10], end[:10]
+            connection, site_property or "", start[:10],
+            (date.fromisoformat(end[:10]) - timedelta(days=1)).isoformat(),
         ) if site_property else None
     except Exception:
         visits = None
@@ -12460,9 +12579,13 @@ def run_site_codex_update(user_id, prompt, suggested_image_path=None, provider=N
         )
     save_codex_message(user_id, "user", user_message, directory_path=workspace_path)
     guarded_prompt = build_workspace_update_prompt(prompt, suggested_image_path)
-    result = run_site_ai_fallback_update(
-        user_id, workspace_path, guarded_prompt, provider, model, selection=selection
-    )
+    try:
+        result = run_site_ai_fallback_update(
+            user_id, workspace_path, guarded_prompt, provider, model, selection=selection
+        )
+    except (ValueError, OSError, UnicodeError) as error:
+        # Use the same rollback and history path for provider/validation/write failures.
+        result = {"exit_code": 1, "output": str(error), "reply": str(error)}
     history_source = f"ai-direct:{provider}"
     reply = result.get("reply") or result.get("output") or ""
     after_manifest = build_workspace_manifest(workspace_path)
@@ -12637,19 +12760,24 @@ def parse_site_ai_update_plan(text):
 def apply_site_ai_update_plan(workspace_path, plan):
     root_path = os.path.realpath(workspace_path)
     seen_paths = set()
+    operations = []
     for item in plan.get("files") or []:
         if not isinstance(item, dict):
             raise ValueError("The AI provider returned an invalid file entry.")
-        relative_path = str(item.get("path") or "").replace("\\", "/").strip("/")
+        relative_path = str(item.get("path") or "").replace("\\", "/")
         content = item.get("content")
         if (
             not relative_path
+            or relative_path.startswith("/")
+            or "\x00" in relative_path
+            or ":" in relative_path
             or contains_parent_reference(relative_path)
             or relative_path_has_reserved_component(relative_path)
             or not isinstance(content, str)
             or is_blocked_update_extension(relative_path)
         ):
             raise ValueError("The AI provider returned an unsafe file update.")
+        relative_path = posixpath.normpath(relative_path)
         path_key = relative_path.casefold()
         if path_key in seen_paths:
             raise ValueError("The AI provider returned duplicate file updates.")
@@ -12660,11 +12788,28 @@ def apply_site_ai_update_plan(workspace_path, plan):
         parent_path = os.path.dirname(target_path)
         if not path_is_inside(root_path, parent_path) or path_contains_symlink(root_path, parent_path):
             raise ValueError(translate("site.file_outside_workspace"))
-        os.makedirs(parent_path, exist_ok=True)
-        with open(target_path, "w", encoding="utf-8", errors="strict") as file:
-            file.write(content)
+        if os.path.islink(target_path) or (os.path.exists(target_path) and not os.path.isfile(target_path)):
+            raise ValueError(translate("site.file_outside_workspace"))
+        operations.append((target_path, content.encode("utf-8", errors="strict")))
     if not seen_paths:
         raise ValueError("The AI provider did not propose any file changes.")
+    for path in seen_paths:
+        if any(parent in seen_paths for parent in ("/".join(path.split("/")[:i]) for i in range(1, len(path.split("/"))))):
+            raise ValueError("The AI provider returned conflicting file paths.")
+    # Validate every entry before touching any destination, then replace files atomically.
+    with tempfile.TemporaryDirectory(prefix=".oneboard-edit-", dir=root_path) as staging:
+        for index, (target_path, content) in enumerate(operations):
+            staged_path = os.path.join(staging, str(index))
+            with open(staged_path, "wb") as handle:
+                handle.write(content)
+            mode = stat_module.S_IMODE(os.stat(target_path).st_mode) if os.path.exists(target_path) else 0o644
+            os.chmod(staged_path, mode)
+        for index, (target_path, _content) in enumerate(operations):
+            parent_path = os.path.dirname(target_path)
+            if path_contains_symlink(root_path, target_path):
+                raise ValueError(translate("site.file_outside_workspace"))
+            os.makedirs(parent_path, exist_ok=True)
+            os.replace(os.path.join(staging, str(index)), target_path)
 
 
 def build_workspace_update_prompt(prompt, suggested_image_path=None):

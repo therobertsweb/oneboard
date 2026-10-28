@@ -1,4 +1,4 @@
-/* ONEBoard visual picker: runs inside the site preview iframe (same origin).
+/* ONEBoard visual picker: runs inside the sandboxed site preview iframe.
  * The parent Studio tab toggles it via postMessage and receives the selection
  * the same way. One-shot: it deactivates after each pick. */
 (() => {
@@ -39,7 +39,7 @@
   }
 
   function selectorFor(element) {
-    if (element.id) return `#${element.id}`;
+    if (element.id) return `#${CSS.escape(element.id)}`;
     const parts = [];
     let node = element;
     while (node && node.nodeType === 1 && node !== document.body && parts.length < 8) {
@@ -115,7 +115,7 @@
   );
 
   window.addEventListener("message", (event) => {
-    if (event.origin !== window.location.origin) return;
+    if (event.source !== window.parent || event.origin !== window.location.origin) return;
     const data = event.data || {};
     if (data.type === "oneboard-picker-toggle") setActive(data.active);
   });

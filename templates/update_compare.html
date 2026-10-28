@@ -58,7 +58,7 @@
         <div class="col-md-6">
           <p class="settings-note"><strong>{{ t("site.before") }}</strong></p>
           {% if file.before_url %}
-          <iframe src="{{ file.before_url }}" title="{{ t('site.before') }} {{ file.path }}" class="compare-frame" data-device-frame loading="lazy"></iframe>
+          <iframe sandbox="allow-scripts" src="{{ file.before_url }}" title="{{ t('site.before') }} {{ file.path }}" class="compare-frame" data-device-frame loading="lazy"></iframe>
           {% else %}
           <div class="empty-state compact">{{ t("site.compare_added") }}</div>
           {% endif %}
@@ -66,7 +66,7 @@
         <div class="col-md-6">
           <p class="settings-note"><strong>{{ t("site.after") }}</strong></p>
           {% if file.after_url %}
-          <iframe src="{{ file.after_url }}" title="{{ t('site.after') }} {{ file.path }}" class="compare-frame" data-device-frame loading="lazy"></iframe>
+          <iframe sandbox="allow-scripts" src="{{ file.after_url }}" title="{{ t('site.after') }} {{ file.path }}" class="compare-frame" data-device-frame loading="lazy"></iframe>
           {% else %}
           <div class="empty-state compact">{{ t("site.compare_removed") }}</div>
           {% endif %}
