@@ -60,11 +60,14 @@
             class="form-control"
             id="sitePathInput"
             name="path"
-            placeholder="{{ t('site.path_placeholder') }}"
+            placeholder="{{ t('site.select_folder_hint') }}"
             value="{{ manager.directory.path if manager.directory else '' }}"
-            required
+            readonly
+            aria-label="{{ t('site.path') }}"
           >
-          <button type="button" class="btn btn-outline-secondary btn-sm" id="browseDirectoryBtn" data-browse-url="{{ url_for('api_site_manager_browse_directory') }}">{{ t("site.browse") }}</button>
+          <button type="button" class="btn btn-primary btn-sm site-folder-picker-button" id="browseDirectoryBtn" data-browse-url="{{ url_for('api_site_manager_browse_directory') }}">
+            <span aria-hidden="true">▣</span> {{ t("site.select_folder") }}
+          </button>
           <button type="submit" class="btn btn-primary btn-sm">{{ t("site.connect") }}</button>
         </form>
       </article>
@@ -656,29 +659,30 @@
   </main>
 </div>
 
-<div class="modal fade" id="directoryBrowserModal" tabindex="-1" aria-hidden="true">
+<dialog class="directory-browser-dialog" id="directoryBrowserModal" aria-labelledby="directoryBrowserTitle">
   <div class="modal-dialog modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header">
-        <h2 class="modal-title">{{ t("site.browser_title") }}</h2>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <h2 class="modal-title" id="directoryBrowserTitle">{{ t("site.browser_title") }}</h2>
+        <button type="button" class="btn-close" data-close-directory-browser aria-label="{{ t('site.browser_cancel') }}">×</button>
       </div>
       <div class="modal-body">
+        <p class="browser-intro">{{ t("site.browser_intro") }}</p>
         <p class="browser-current" id="browserCurrentPath"></p>
         <div class="browser-nav">
           <button type="button" class="btn btn-outline-secondary btn-sm" id="browserUpBtn">{{ t("site.browser_up") }}</button>
           <button type="button" class="btn btn-outline-secondary btn-sm" id="browserHomeBtn">{{ t("site.browser_home") }}</button>
         </div>
-        <div class="list-group browser-list" id="browserList"></div>
+        <div class="list-group browser-list" id="browserList" aria-live="polite"></div>
         <p class="browser-note" id="browserNote" hidden>{{ t("site.browser_cannot_select") }}</p>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">{{ t("site.browser_cancel") }}</button>
-        <button type="button" class="btn btn-primary" id="browserUseBtn">{{ t("site.use_folder") }}</button>
+        <button type="button" class="btn btn-outline-secondary" data-close-directory-browser>{{ t("site.browser_cancel") }}</button>
+        <button type="button" class="btn btn-primary" id="browserUseBtn" disabled>{{ t("site.use_folder") }}</button>
       </div>
     </div>
   </div>
-</div>
+</dialog>
 
 <script>
 (() => {
@@ -900,14 +904,21 @@
   const sitePathInput = document.getElementById("sitePathInput");
   let browserState = { current: "", parent: null, home: "", canSelect: false };
   let browserAutoConnect = false;
+  let browserRequest = 0;
 
   async function loadBrowserPath(path) {
     if (!browseBtn || !browserList) return;
+    const requestId = ++browserRequest;
+    browserState.canSelect = false;
+    browserUseBtn.disabled = true;
+    browserNote.hidden = true;
+    browserList.setAttribute("aria-busy", "true");
     browserList.innerHTML = "";
     browserCurrentPath.textContent = path || "";
     try {
       const response = await fetch(`${browseBtn.dataset.browseUrl}?path=${encodeURIComponent(path || "")}`);
       const data = await response.json();
+      if (requestId !== browserRequest) return;
       if (!response.ok || !data.ok) {
         throw new Error(data.error || "Request failed.");
       }
@@ -925,31 +936,39 @@
         const item = document.createElement("button");
         item.type = "button";
         item.className = "list-group-item list-group-item-action browser-entry";
-        item.textContent = entry.name;
+        item.innerHTML = `<span class="browser-folder-icon" aria-hidden="true">📁</span><span>${escapeHtml(entry.name)}</span><span class="browser-entry-chevron" aria-hidden="true">›</span>`;
         item.addEventListener("click", () => loadBrowserPath(entry.path));
         browserList.appendChild(item);
       });
     } catch (error) {
+      if (requestId !== browserRequest) return;
       browserList.innerHTML = `<p class="browser-empty">${escapeHtml(error.message)}</p>`;
+    } finally {
+      if (requestId === browserRequest) browserList.setAttribute("aria-busy", "false");
     }
   }
 
-  if (browseBtn && browserModalEl && window.bootstrap) {
-    const browserModal = window.bootstrap.Modal.getOrCreateInstance(browserModalEl);
-    browseBtn.addEventListener("click", () => {
+  if (browseBtn && browserModalEl) {
+    browserModalEl.querySelectorAll("[data-close-directory-browser]").forEach((button) => {
+      button.addEventListener("click", () => browserModalEl.close());
+    });
+    const openFolderPicker = () => {
       browserAutoConnect = false;
       loadBrowserPath(sitePathInput ? sitePathInput.value.trim() : "");
-      browserModal.show();
-    });
+      browserModalEl.showModal();
+    };
+    browseBtn.addEventListener("click", openFolderPicker);
+    if (sitePathInput) sitePathInput.addEventListener("click", openFolderPicker);
     browserUpBtn.addEventListener("click", () => {
       if (browserState.parent) loadBrowserPath(browserState.parent);
     });
     browserHomeBtn.addEventListener("click", () => loadBrowserPath(browserState.home));
     browserUseBtn.addEventListener("click", () => {
+      if (!browserState.canSelect || browserUseBtn.disabled) return;
       if (sitePathInput && browserState.current) {
         sitePathInput.value = browserState.current;
       }
-      browserModal.hide();
+      browserModalEl.close();
       if (browserAutoConnect && sitePathInput) {
         const connectForm = sitePathInput.closest("form");
         if (connectForm && typeof connectForm.requestSubmit === "function") {
@@ -962,11 +981,11 @@
 
   const projectsPanel = document.getElementById("projectsPanel");
   const newProjectBtn = document.getElementById("newProjectBtn");
-  if (newProjectBtn && browserModalEl && window.bootstrap) {
+  if (newProjectBtn && browserModalEl) {
     newProjectBtn.addEventListener("click", () => {
       browserAutoConnect = true;
       loadBrowserPath("");
-      window.bootstrap.Modal.getOrCreateInstance(browserModalEl).show();
+      browserModalEl.showModal();
     });
   }
   if (projectsPanel) {

@@ -1106,6 +1106,76 @@ a {
   font-size: 0.8rem;
 }
 
+.site-path-inline-form .form-control[readonly] {
+  cursor: pointer;
+  color: var(--ink);
+  background: var(--surface-3);
+}
+
+.site-folder-picker-button {
+  white-space: nowrap;
+}
+
+.site-folder-picker-button span {
+  margin-right: 3px;
+  font-size: 0.95rem;
+}
+
+.browser-intro {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.directory-browser-dialog {
+  width: min(600px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  padding: 0;
+  margin: auto;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 24px 80px #0008;
+}
+
+.directory-browser-dialog::backdrop {
+  background: #0009;
+}
+
+.directory-browser-dialog .modal-dialog {
+  max-width: none;
+  height: auto;
+  margin: 0;
+  pointer-events: auto;
+}
+
+.directory-browser-dialog .modal-header,
+.directory-browser-dialog .modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+}
+
+.directory-browser-dialog .modal-body {
+  padding: 16px;
+}
+
+.directory-browser-dialog .modal-title {
+  font-size: 1.15rem;
+}
+
+.directory-browser-dialog .btn-close {
+  background: none;
+  color: var(--ink);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
 .browser-current {
   margin: 0 0 10px;
   padding: 8px 10px;
@@ -1130,8 +1200,23 @@ a {
 }
 
 .browser-entry {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
   text-align: left;
   overflow-wrap: anywhere;
+}
+
+.browser-folder-icon {
+  font-size: 1.05rem;
+}
+
+.browser-entry-chevron {
+  color: var(--muted);
+  font-size: 1.35rem;
+  line-height: 1;
 }
 
 .browser-empty {
