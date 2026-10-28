@@ -18,6 +18,23 @@ Session check: `GET /api/session`.
 All endpoints below require login except the auth ones above.
 Success envelope: `{ok: true, ...}`. Errors: `{ok: false, error}` with HTTP status.
 
+## Context shared between sections
+
+Social generation/publication, local health actions and public security scans accept
+`expected_directory_path` in POST payloads. The web UI sends the project that was
+open when the page rendered; a mismatch rejects the operation before it runs.
+Social suggestions/history also accept it as a query parameter.
+
+`GET /api/site-manager/intelligence` combines current pages, brand, local findings,
+calendar, recent edits and the latest security scan linked to the configured domain
+and current folder. Studio edits refresh local health; they do not mark the public
+security scan as resolved. `GET /security-scan/<id>/repair` prepares a task in Studio
+for a matching scan, without changing files until the user sends it.
+
+Social history is scoped to the current folder. Use
+`GET /api/social/buffer/posts?scope=unassigned` for older records with no project.
+See [the integration review](INTEGRATION_REVIEW.md) for the workflow and boundaries.
+
 ## Dashboard & Search Console
 
 - `GET /api/dashboard` — stats, charts, opportunities.

@@ -26,6 +26,7 @@
     </header>
 
     {% include "partials/alerts.html" %}
+    {% include "partials/workspace_context.html" %}
     {% if not health.can_edit %}
     <div class="alert alert-info">{{ t("teams.read_only") }}</div>
     {% endif %}
@@ -83,7 +84,7 @@
           const response = await fetch("{{ url_for('api_site_health_summary') }}", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({}),
+            body: JSON.stringify({expected_directory_path: {{ active_workspace.path|tojson if active_workspace else '""' }}}),
           });
           const data = await response.json();
           if (!response.ok || !data.ok) throw new Error(data.error || "Request failed.");

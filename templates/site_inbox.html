@@ -26,6 +26,7 @@
     </header>
 
     {% include "partials/alerts.html" %}
+    {% include "partials/workspace_context.html" %}
     {% if team_context and not team_context.permissions.edit %}
     <div class="alert alert-info">{{ t("teams.read_only") }}</div>
     {% endif %}

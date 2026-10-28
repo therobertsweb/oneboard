@@ -398,7 +398,7 @@
               placeholder="{{ t('site.codex_prompt_placeholder') }}"
               {% if not manager.directory %}disabled{% endif %}
               required
-            ></textarea>
+            >{{ initial_prompt|default('') }}</textarea>
             <button type="submit" class="btn btn-primary" id="codexSubmitBtn" {% if not manager.directory %}disabled{% endif %}>
               {{ t("site.run_codex") }}
             </button>

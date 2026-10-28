@@ -25,6 +25,10 @@
     </header>
 
     {% include "partials/alerts.html" %}
+    {% include "partials/workspace_context.html" %}
+    {% if active_workspace %}
+    <p class="settings-note">{{ t('scan.project_note') }}</p>
+    {% endif %}
 
     <section class="scan-hero scan-hero-modern">
       <div>
@@ -70,6 +74,9 @@
             <div>
               <strong>{{ item.domain }}</strong>
               <span>{{ item.created_at }}</span>
+              {% if item.project_linked %}
+              <a href="{{ url_for('security_scan_repair', scan_id=item.id, expected_directory_path=active_workspace.path) }}">{{ t('scan.repair_studio') }}</a>
+              {% endif %}
             </div>
             <div class="scan-history-score">
               <b>{{ item.score }}</b>
@@ -256,6 +263,10 @@
           </li>
           {% endfor %}
         </ul>
+        {% if scan.project_linked %}
+        <a class="btn btn-primary" href="{{ url_for('security_scan_repair', scan_id=scan.id, expected_directory_path=active_workspace.path) }}">{{ t('scan.repair_studio') }}</a>
+        <p class="settings-note">{{ t('scan.repair_note') }}</p>
+        {% endif %}
       </article>
     </section>
 

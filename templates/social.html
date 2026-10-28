@@ -25,6 +25,7 @@
     </header>
 
     {% include "partials/alerts.html" %}
+    {% include "partials/workspace_context.html" %}
 
     {% if not buffer_configured %}
     <div class="alert alert-warning app-alert" role="alert">
@@ -37,6 +38,7 @@
     {% endif %}
 
     <div id="socialApp"
+      data-directory-path="{{ active_workspace.path if active_workspace else '' }}"
       data-channels-url="{{ url_for('api_social_buffer_channels') }}"
       data-generate-url="{{ url_for('api_social_generate') }}"
       data-images-url="{{ url_for('api_ai_images_generate') }}"
@@ -153,6 +155,10 @@
       <section class="panel social-history-panel">
         <div class="panel-heading">
           <h2>{{ t("social.history") }}</h2>
+          <select id="socialHistoryScope" class="form-select" aria-label="{{ t('social.history') }}">
+            <option value="project">{{ t('social.history_project') }}</option>
+            <option value="unassigned">{{ t('social.history_unassigned') }}</option>
+          </select>
         </div>
         <div class="social-history-list" id="socialHistory"></div>
       </section>
@@ -253,7 +259,7 @@
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({...payload, expected_directory_path: app.dataset.directoryPath}),
     });
     const data = await response.json();
     if (!response.ok || !data.ok) {
@@ -294,7 +300,8 @@
 
   async function loadHistory() {
     try {
-      const response = await fetch(app.dataset.historyUrl);
+      const scope = document.getElementById("socialHistoryScope").value;
+      const response = await fetch(`${app.dataset.historyUrl}?scope=${scope}&expected_directory_path=${encodeURIComponent(app.dataset.directoryPath)}`);
       const data = await response.json();
       if (!response.ok || !data.ok) {
         throw new Error(data.error || "Request failed.");
@@ -321,6 +328,7 @@
   }
 
   postText.addEventListener("input", updatePreview);
+  document.getElementById("socialHistoryScope").addEventListener("change", loadHistory);
   channelSelect.addEventListener("change", updatePreview);
   allCheck.addEventListener("change", updatePreview);
   postTypeSelect.addEventListener("change", updatePreview);
@@ -367,7 +375,7 @@
 
   async function loadSuggestions() {
     try {
-      const response = await fetch(app.dataset.suggestionsUrl);
+      const response = await fetch(`${app.dataset.suggestionsUrl}?expected_directory_path=${encodeURIComponent(app.dataset.directoryPath)}`);
       const data = await response.json();
       if (!response.ok || !data.ok) {
         throw new Error(data.error || "Request failed.");

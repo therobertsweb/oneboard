@@ -1,0 +1,13 @@
+{% if active_workspace %}
+<section class="panel workspace-context" aria-label="{{ t('site.directory') }}">
+  <strong>{{ active_workspace.display_name or active_workspace.path.split('/')[-1] }}</strong>
+  <small>{{ active_workspace.path }}</small>
+  <nav class="d-flex gap-3 flex-wrap" aria-label="{{ t('site.title') }}">
+    <a href="{{ url_for('site_manager') }}">{{ t('site.tab_studio') }}</a>
+    <a href="{{ url_for('site_health') }}">{{ t('site.health') }}</a>
+    <a href="{{ url_for('security_scan') }}">{{ t('nav.security_scan') }}</a>
+    <a href="{{ url_for('social') }}">{{ t('nav.social') }}</a>
+    <a href="{{ url_for('site_settings') }}">{{ t('site.site_settings') }}</a>
+  </nav>
+</section>
+{% endif %}

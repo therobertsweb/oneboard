@@ -118,6 +118,7 @@ class ReportsTests(unittest.TestCase):
         self.assertEqual(self.client.get(f"/reports/{token}").status_code, 404)
 
     def test_visits_from_search_console(self):
+        self.client.post("/api/site-manager/site", json={"gsc_property": "sc-domain:bakery.example"})
         month = date.today().strftime("%Y-%m")
         created = self.client.post("/api/site-manager/reports", json={"period": month})
         link = created.get_json()["link"]
@@ -128,6 +129,15 @@ class ReportsTests(unittest.TestCase):
             summary = self.client.get(f"/api/site-manager/reports/{link['id']}").get_json()["report"]
         self.assertEqual(summary["visits"]["clicks"], 120)
         self.assertEqual(summary["visits"]["impressions"], 3400)
+
+    def test_report_never_uses_another_sites_account_property(self):
+        month = date.today().strftime("%Y-%m")
+        with mock.patch.object(oneboard, "valid_google_connection", return_value={"selected_site_url": "https://other-client.example/"}), mock.patch.object(oneboard, "fetch_search_console_totals") as fetch:
+            with oneboard.app.app_context():
+                workspace = oneboard.get_current_workspace(self.owner_id)
+                report = oneboard.build_site_report(self.owner_id, workspace, month)
+            self.assertIsNone(report["visits"])
+            fetch.assert_not_called()
 
     def test_link_management_requires_manage(self):
         created = self.client.post("/api/teams", json={"name": "Reports Team"})

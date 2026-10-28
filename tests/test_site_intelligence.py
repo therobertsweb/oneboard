@@ -203,6 +203,149 @@ class SiteIntelligenceTests(unittest.TestCase):
         self.assertIn("Weekend sourdough discount", joined)
         self.assertIn("Our story", joined)
 
+    def test_single_page_site_supplies_social_ideas_without_brand(self):
+        self._connect()
+        (self.site / "about.html").unlink()
+        payload = self.client.get("/api/social/suggestions").get_json()
+        self.assertIn("sourdough", json.dumps(payload["suggestions"]))
+
+    def _save_security_scan(self, domain="bakery.example"):
+        scan = {
+            "domain": domain, "score": 70, "grade": "C", "verdict": "Review headers",
+            "http": {"https_available": True, "missing_headers": ["X-Content-Type-Options"]},
+            "tls": {"hsts": False, "status": "ok"}, "dns": {"status": "ok"},
+            "tech": {"hints": []},
+            "recommendations": [{"title": "Add X-Content-Type-Options", "detail": "Use nosniff"}],
+        }
+        with oneboard.app.app_context():
+            return oneboard.save_security_scan_result(self.owner_id, scan)
+
+    def test_security_context_is_linked_only_to_matching_project_and_domain(self):
+        self._connect()
+        self.client.post("/api/site-manager/site", json={"brand": {"website": "https://bakery.example"}})
+        scan_id = self._save_security_scan()
+        self._save_security_scan("unrelated.example")
+        intel = self.client.get("/api/site-manager/intelligence").get_json()["intelligence"]
+        self.assertEqual(intel["security_scan"]["id"], scan_id)
+        repair = self.client.get(f"/security-scan/{scan_id}/repair")
+        self.assertEqual(repair.status_code, 200)
+        self.assertIn("Use nosniff", repair.get_data(as_text=True))
+        other = self.workspace_path / "other"
+        other.mkdir()
+        self.client.post("/api/site-manager/connect", json={"path": str(other)})
+        self.client.post("/api/site-manager/site", json={"brand": {"website": "https://bakery.example"}})
+        intel = self.client.get("/api/site-manager/intelligence").get_json()["intelligence"]
+        self.assertIsNone(intel["security_scan"])
+        self.assertEqual(self.client.get(f"/security-scan/{scan_id}/repair").status_code, 302)
+
+    def test_social_history_follows_project_and_preserves_unassigned_records(self):
+        with oneboard.app.app_context():
+            oneboard.record_social_post(self.owner_id, "ch", "channel", "Legacy", "draft")
+        self._connect()
+        with oneboard.app.app_context():
+            oneboard.record_social_post(self.owner_id, "ch", "channel", "Bakery", "draft")
+        other = self.workspace_path / "other"
+        other.mkdir()
+        self.client.post("/api/site-manager/connect", json={"path": str(other)})
+        self.assertEqual(self.client.get("/api/social/buffer/posts").get_json()["posts"], [])
+        self._connect()
+        posts = self.client.get("/api/social/buffer/posts").get_json()["posts"]
+        self.assertEqual([post["text"] for post in posts], ["Bakery"])
+        legacy = self.client.get("/api/social/buffer/posts?scope=unassigned").get_json()["posts"]
+        self.assertEqual([post["text"] for post in legacy], ["Legacy"])
+        with oneboard.app.app_context():
+            self.assertEqual(oneboard.query_db("SELECT COUNT(*) AS n FROM social_posts WHERE user_id = ?", (self.owner_id,), one=True)["n"], 2)
+
+    def test_security_history_keeps_latest_scans_after_window_is_full(self):
+        self._connect()
+        for _ in range(121):
+            latest_id = self._save_security_scan()
+        with oneboard.app.app_context():
+            history = oneboard.build_security_scan_history(self.owner_id)
+        self.assertEqual(history["total"], 121)
+        self.assertEqual(history["latest"][0]["id"], latest_id)
+
+    def test_social_publishing_requires_project_publish_permission(self):
+        self._connect()
+        viewer_id = self._create_user("Viewer")
+        team_id = self.client.post("/api/teams", json={"name": "Bakery team"}).get_json()["team"]["id"]
+        with oneboard.app.app_context():
+            email = oneboard.query_db("SELECT email FROM users WHERE id = ?", (viewer_id,), one=True)["email"]
+            workspace_id = oneboard.get_current_workspace(self.owner_id)["id"]
+        invitation = self.client.post(f"/api/teams/{team_id}/invites", json={"email": email, "role": "viewer"}).get_json()
+        self.client.post(f"/api/teams/{team_id}/projects", json={"project_id": workspace_id})
+        self.login(viewer_id)
+        token = invitation["invite_link"].rstrip("/").rsplit("/", 1)[-1]
+        self.client.post("/api/teams/invites/accept", json={"token": token})
+        response = self.client.post("/api/site-manager/connect", json={"project_id": workspace_id})
+        self.assertEqual(response.status_code, 200)
+        with mock.patch.object(oneboard, "create_buffer_post") as publish:
+            response = self.client.post("/api/social/buffer/posts", json={"channel_id": "ch", "text": "Test"})
+            self.assertEqual(response.status_code, 403)
+            publish.assert_not_called()
+
+    def test_stale_tabs_cannot_generate_publish_or_repair_another_project(self):
+        self._connect()
+        other = self.workspace_path / "other"
+        other.mkdir()
+        self.client.post("/api/site-manager/connect", json={"path": str(other)})
+        with mock.patch.object(oneboard, "run_ai_provider_prompt") as ai, mock.patch.object(oneboard, "create_buffer_post") as publish:
+            for endpoint in ("/api/social/generate", "/api/social/ideas", "/api/social/buffer/posts",
+                             "/api/site-manager/health/scan", "/api/site-manager/health/ai-fix",
+                             "/api/site-manager/health/fix-all", "/api/security-scan"):
+                response = self.client.post(endpoint, json={"expected_directory_path": str(self.site)})
+                self.assertEqual(response.status_code, 400, endpoint)
+                self.assertIn("changed", response.get_json()["error"])
+            ai.assert_not_called()
+            publish.assert_not_called()
+
+    def test_large_site_context_keeps_findings_events_and_page_content(self):
+        self._connect()
+        self._scan()
+        self.client.post("/api/site-manager/calendar", json={"kind": "promo", "title": "Bread festival", "starts_on": "2026-11-01"})
+        for index in range(12):
+            (self.site / f"long-{index}.html").write_text("<h1>Baking</h1><p>" + "fresh bread " * 300 + "</p>")
+        with oneboard.app.app_context():
+            context = oneboard.site_intelligence_prompt_block(self.owner_id)
+        self.assertLessEqual(len(context), oneboard.INTELLIGENCE_MAX_PROMPT_CHARS)
+        self.assertIn("missing_title", context)
+        self.assertIn("Bread festival", context)
+        self.assertIn("sourdough", context)
+
+    def test_studio_edit_refreshes_health_and_social_and_keeps_security_unverified(self):
+        self._connect()
+        self._set_ai_key()
+        self._scan()
+        self.client.post("/api/site-manager/site", json={"brand": {"website": "https://bakery.example"}})
+        scan_id = self._save_security_scan()
+        plan = {"summary": "Updated homepage", "files": [{"path": "index.html", "content": "<html><head><title>Bakery</title></head><body><h1>Bakery</h1><p>New croissant workshops.</p></body></html>"}]}
+        with mock.patch.object(oneboard, "run_ai_provider_prompt", return_value=(json.dumps(plan), {}, "muse-text-1.0")) as provider, mock.patch.object(oneboard, "get_muse_models", return_value=["muse-text-1.0"]):
+            response = self.client.post("/api/site-manager/codex-update", json={"prompt": "Update homepage", "expected_directory_path": str(self.site)})
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertIn("X-Content-Type-Options", provider.call_args.args[3])
+        intel = self.client.get("/api/site-manager/intelligence").get_json()["intelligence"]
+        self.assertNotIn("missing_title", {issue["check"] for issue in intel["open_issues"]})
+        self.assertEqual(intel["security_scan"]["id"], scan_id)
+        self.assertIn("croissant", json.dumps(self.client.get("/api/social/suggestions").get_json()))
+        with oneboard.app.app_context():
+            history = oneboard.query_db("SELECT snapshot_path, status FROM website_update_history WHERE user_id = ? ORDER BY id DESC LIMIT 1", (self.owner_id,), one=True)
+            self.assertTrue(Path(history["snapshot_path"]).exists())
+            self.assertEqual(history["status"], "pending")
+
+    def test_sections_render_shared_project_and_security_navigation(self):
+        self._connect()
+        self.client.post("/api/site-manager/site", json={"brand": {"website": "https://bakery.example"}})
+        self._save_security_scan()
+        self._scan()
+        for path in ("/social", "/security-scan", "/site-manager/health"):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200, path)
+            self.assertIn("workspace-context", response.get_data(as_text=True))
+            self.assertIn(str(self.site), response.get_data(as_text=True))
+        security = self.client.get("/security-scan").get_data(as_text=True)
+        self.assertIn('value="bakery.example"', security)
+        self.assertIn("/repair?", security)
+
     def test_social_generate_without_prompt_uses_site(self):
         self._connect()
         self._brand()

@@ -1128,6 +1128,18 @@ a {
   line-height: 1.45;
 }
 
+.workspace-context {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 16px;
+}
+
+.workspace-context small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .directory-browser-dialog {
   width: min(600px, calc(100vw - 32px));
   max-height: calc(100dvh - 48px);
