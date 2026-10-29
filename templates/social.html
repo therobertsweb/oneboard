@@ -49,6 +49,7 @@
       data-suggestions-url="{{ url_for('api_social_suggestions') }}"
       data-ideas-url="{{ url_for('api_social_ideas') }}"
       data-working="{{ t('social.working') }}"
+      data-image-processing="{{ t('social.image_processing') }}"
       data-published="{{ t('social.published_ok') }}"
       data-published-now="{{ t('social.published_now_ok') }}"
       data-draft-saved="{{ t('social.draft_ok') }}"
@@ -202,6 +203,7 @@
   let loadedChannels = [];
   let previewSrc = "";
   let localObjectUrl = "";
+  let imageProcessing = false;
   const publishBtn = document.getElementById("socialPublishBtn");
   const defaultChannelLabel = previewChannel.textContent;
 
@@ -224,6 +226,13 @@
       button.disabled = false;
       if (button.dataset.label) button.textContent = button.dataset.label;
     }
+  }
+
+  function setImageProcessing(processing) {
+    imageProcessing = processing;
+    [draftBtn, queueBtn, publishBtn].forEach((button) => {
+      button.disabled = processing;
+    });
   }
 
   function updatePreview() {
@@ -421,6 +430,7 @@
       imagePrompt.focus();
       return;
     }
+    setImageProcessing(true);
     setBusy(imageBtn, true);
     statusLine.textContent = "";
     try {
@@ -430,6 +440,7 @@
       statusLine.textContent = error.message;
     } finally {
       setBusy(imageBtn, false);
+      setImageProcessing(false);
     }
   });
 
@@ -441,6 +452,7 @@
       imageFile.click();
       return;
     }
+    setImageProcessing(true);
     setBusy(uploadBtn, true);
     statusLine.textContent = "";
     try {
@@ -457,6 +469,7 @@
       setAttachedImage("");
     } finally {
       setBusy(uploadBtn, false);
+      setImageProcessing(false);
     }
   }
 
@@ -499,6 +512,10 @@
   });
 
   async function publish({ draft = false, publishNow = false } = {}) {
+    if (imageProcessing) {
+      statusLine.textContent = app.dataset.imageProcessing;
+      return;
+    }
     const useAll = allCheck.checked && loadedChannels.length > 0;
     const channelId = channelSelect.value;
     const text = postText.value.trim();

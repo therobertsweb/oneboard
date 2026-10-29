@@ -4,6 +4,7 @@ import html
 import os
 import difflib
 import hashlib
+import hmac
 import ipaddress
 import json
 import mimetypes
@@ -647,6 +648,7 @@ TRANSLATIONS = {
         "social.edit_instruction_required": "Describe how to edit the image.",
         "social.upload_label": "Or upload your own image",
         "social.upload_button": "Upload image",
+        "social.image_processing": "Wait for the image to finish processing before publishing.",
         "social.no_file": "No file chosen",
         "social.edit_label": "Edit this image with AI (optional)",
         "social.edit_placeholder": "E.g. make the sky sunset",
@@ -1504,6 +1506,7 @@ TRANSLATIONS = {
         "social.edit_instruction_required": "Describe cómo editar la imagen.",
         "social.upload_label": "O sube tu propia imagen",
         "social.upload_button": "Subir imagen",
+        "social.image_processing": "Espera a que termine de procesarse la imagen antes de publicar.",
         "social.no_file": "Ningún archivo",
         "social.edit_label": "Editar esta imagen con IA (opcional)",
         "social.edit_placeholder": "Ej. pon el cielo al atardecer",
@@ -2087,6 +2090,23 @@ def create_app():
         if not safe_name.startswith(f"user-{g.user['id']}-"):
             abort(404)
         return send_from_directory(social_image_directory(), safe_name)
+
+    @app.route("/buffer-media/<filename>/<signature>")
+    def public_buffer_image(filename, signature):
+        safe_name = posixpath.basename(filename or "")
+        if (
+            safe_name != filename
+            or not signature.isascii()
+            or not hmac.compare_digest(signature, buffer_image_signature(safe_name))
+        ):
+            abort(404)
+        for directory in (generated_image_directory(), social_image_directory()):
+            if os.path.isfile(os.path.join(directory, safe_name)):
+                response = send_from_directory(directory, safe_name)
+                response.headers["Cache-Control"] = "public, max-age=3600"
+                response.headers["Content-Disposition"] = "inline"
+                return response
+        abort(404)
 
     @app.teardown_appcontext
     def close_db(error):
@@ -2999,6 +3019,12 @@ def create_app():
             parsed_url = urllib.parse.urlparse(image_url)
             if parsed_url.scheme not in ("http", "https") or not parsed_url.netloc:
                 return api_error(translate("social.image_url_invalid"), 400)
+            try:
+                buffer_image_url_for_post = buffer_image_url(g.user["id"], image_url)
+            except ValueError as error:
+                return api_error(str(error), 400)
+        else:
+            buffer_image_url_for_post = None
         if not text:
             if not prompt:
                 return api_error(translate("social.text_required"), 400)
@@ -3029,7 +3055,8 @@ def create_app():
         for channel in targets:
             try:
                 post = create_buffer_post(
-                    api_key, channel["id"], text, draft=draft, image_url=image_url or None,
+                    api_key, channel["id"], text, draft=draft,
+                    image_url=buffer_image_url_for_post,
                     publish_now=publish_now, post_type=post_type,
                     channel_service=channel.get("service") or "",
                 )
@@ -14262,6 +14289,25 @@ def resolve_own_social_image(user_id, image_url):
     if not os.path.isfile(absolute_path):
         raise ValueError(translate("flash.image_invalid"))
     return absolute_path
+
+
+def buffer_image_signature(filename):
+    secret = str(app.config["SECRET_KEY"]).encode("utf-8")
+    return hmac.new(secret, filename.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def buffer_image_url(user_id, image_url):
+    parsed_url = urllib.parse.urlparse(image_url or "")
+    if parsed_url.path.startswith(("/uploads/generated-images/", "/uploads/social-images/")):
+        resolve_own_social_image(user_id, image_url)
+        filename = posixpath.basename(parsed_url.path)
+        return url_for(
+            "public_buffer_image",
+            filename=filename,
+            signature=buffer_image_signature(filename),
+            _external=True,
+        )
+    return image_url
 
 
 def generated_image_directory():

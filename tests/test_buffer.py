@@ -4,6 +4,7 @@ import os
 import re
 import tempfile
 import unittest
+import urllib.parse
 from datetime import datetime, timezone
 from unittest import mock
 
@@ -416,6 +417,102 @@ class BufferTests(unittest.TestCase):
             json={"channel_id": "ch_1", "text": "Hi", "image_url": "not-a-url"},
         )
         self.assertEqual(bad_url.status_code, 400)
+
+    def test_create_post_uses_public_signed_url_for_owned_image(self):
+        png = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+            b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        upload = self.client.post(
+            "/api/social/images/upload",
+            data={"image": (io.BytesIO(png), "mine.png")},
+            content_type="multipart/form-data",
+        )
+        image_url = urllib.parse.urljoin("http://localhost", upload.get_json()["image"]["url"])
+        seen_queries = []
+
+        def capture(url, payload, headers=None, timeout=30):
+            seen_queries.append((payload or {}).get("query") or "")
+            return buffer_router(url, payload, headers, timeout)
+
+        self.set_buffer_key()
+        with mock.patch.object(oneboard, "perform_json_request", side_effect=capture):
+            response = self.client.post(
+                "/api/social/buffer/posts",
+                json={"channel_id": "ch_1", "text": "Look at this", "image_url": image_url},
+            )
+
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        match = re.search(r'https?://[^" ]+/buffer-media/[^" ]+', seen_queries[-1])
+        self.assertIsNotNone(match)
+        public_url = urllib.parse.urlsplit(match.group(0))
+        public_client = oneboard.app.test_client()
+        served = public_client.get(f"{public_url.path}?{public_url.query}")
+        self.assertEqual(served.status_code, 200)
+        self.assertEqual(served.get_data(), png)
+        self.assertEqual(served.mimetype, "image/png")
+        self.assertEqual(served.headers["Cache-Control"], "public, max-age=3600")
+        served.close()
+
+        invalid_path = public_url.path.rsplit("/", 1)[0] + "/invalid"
+        invalid_signature = public_client.get(invalid_path)
+        self.assertEqual(invalid_signature.status_code, 404)
+
+    def test_create_post_uses_public_signed_url_for_ai_generated_image(self):
+        png = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+            b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+
+        def fake_generate(user_id, prompt, model=None, output_format="png"):
+            filename = f"user-{user_id}-generated.png"
+            path = os.path.join(oneboard.generated_image_directory(), filename)
+            with open(path, "wb") as image_file:
+                image_file.write(png)
+            return {
+                "filename": filename,
+                "path": path,
+                "model": model or "muse-image-1.0",
+                "response_id": "response-1",
+                "size_bytes": len(png),
+            }
+
+        with mock.patch.object(
+            oneboard, "run_muse_image_generation", side_effect=fake_generate
+        ):
+            generated = self.client.post(
+                "/api/ai/images", json={"prompt": "A test image"}
+            )
+        self.assertEqual(generated.status_code, 200, generated.get_data(as_text=True))
+        image_url = urllib.parse.urljoin(
+            "http://localhost", generated.get_json()["image"]["url"]
+        )
+
+        seen_queries = []
+
+        def capture(url, payload, headers=None, timeout=30):
+            seen_queries.append((payload or {}).get("query") or "")
+            return buffer_router(url, payload, headers, timeout)
+
+        self.set_buffer_key()
+        with mock.patch.object(oneboard, "perform_json_request", side_effect=capture):
+            response = self.client.post(
+                "/api/social/buffer/posts",
+                json={"channel_id": "ch_1", "text": "AI artwork", "image_url": image_url},
+            )
+
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        match = re.search(r'https?://[^" ]+/buffer-media/[^" ]+', seen_queries[-1])
+        self.assertIsNotNone(match)
+        public_url = urllib.parse.urlsplit(match.group(0))
+        public_client = oneboard.app.test_client()
+        served = public_client.get(f"{public_url.path}?{public_url.query}")
+        self.assertEqual(served.status_code, 200)
+        self.assertEqual(served.get_data(), png)
+        self.assertEqual(served.mimetype, "image/png")
+        served.close()
 
     def test_social_image_upload_accepts_images_only(self):
         png = (
