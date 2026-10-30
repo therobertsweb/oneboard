@@ -16,7 +16,6 @@ import 'health_panel.dart';
 import 'request_thread_view.dart';
 import 'settings_panel.dart';
 import 'site_brand_panel.dart';
-import 'teams_panel.dart';
 import 'apple_design.dart';
 import 'workspace_dashboard.dart';
 import 'search_console_panel.dart';
@@ -199,6 +198,17 @@ class _OneBoardHomeState extends State<OneBoardHome> {
       'password': _password.text,
       'confirm_password': _confirmPassword.text,
     });
+    final localToken = response['verification_token']?.toString() ?? '';
+    if (localToken.isNotEmpty) {
+      // No email delivery on this machine: complete verification in the app.
+      await _api!.post('/api/auth/verify-email', {'token': localToken});
+      if (!mounted) return;
+      setState(() {
+        _authMode = 'login';
+        _authNotice = 'Email verified. You can now sign in.';
+      });
+      return;
+    }
     setState(() {
       _authMode = 'login';
       _authNotice =
@@ -207,9 +217,15 @@ class _OneBoardHomeState extends State<OneBoardHome> {
   });
 
   Future<void> _forgotPassword() => _action(() async {
-    await _api!.post('/api/auth/forgot-password', {
+    final response = await _api!.post('/api/auth/forgot-password', {
       'email': _email.text.trim(),
     });
+    final localToken = response['reset_token']?.toString() ?? '';
+    if (localToken.isNotEmpty) {
+      if (!mounted) return;
+      await _completeEmailLink(true, initialLink: localToken);
+      return;
+    }
     setState(() {
       _authMode = 'login';
       _authNotice =
@@ -217,12 +233,13 @@ class _OneBoardHomeState extends State<OneBoardHome> {
     });
   });
 
-  Future<void> _completeEmailLink(bool reset) async {
+  Future<void> _completeEmailLink(bool reset, {String? initialLink}) async {
     if (_api == null) return;
     final completed = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => AuthLinkDialog(api: _api!, reset: reset),
+      builder: (_) =>
+          AuthLinkDialog(api: _api!, reset: reset, initialLink: initialLink),
     );
     if (completed == true && mounted) {
       setState(() {
@@ -236,9 +253,16 @@ class _OneBoardHomeState extends State<OneBoardHome> {
   }
 
   Future<void> _resendVerification() => _action(() async {
-    await _api!.post('/api/auth/resend-verification', {
+    final response = await _api!.post('/api/auth/resend-verification', {
       'email': _email.text.trim(),
     });
+    final localToken = response['verification_token']?.toString() ?? '';
+    if (localToken.isNotEmpty) {
+      await _api!.post('/api/auth/verify-email', {'token': localToken});
+      if (!mounted) return;
+      setState(() => _authNotice = 'Email verified. You can now sign in.');
+      return;
+    }
     setState(
       () => _authNotice =
           'If the account is pending verification, you will receive another email.',
@@ -1190,7 +1214,7 @@ class _OneBoardHomeState extends State<OneBoardHome> {
         content: Text('$title · $body'),
         action: SnackBarAction(
           label: 'View',
-          onPressed: () => _loadFeature(13),
+          onPressed: () => _loadFeature(11),
         ),
       ),
     );
@@ -1250,7 +1274,7 @@ class _OneBoardHomeState extends State<OneBoardHome> {
   }
 
   Future<void> _navigate(int index) async {
-    if (index == 15) {
+    if (index == 13) {
       setState(() => _section = index);
     } else if (index == 0) {
       await _loadDashboard();
@@ -1264,7 +1288,7 @@ class _OneBoardHomeState extends State<OneBoardHome> {
   void _refreshSection() {
     if (_section == 0) _loadDashboard();
     if (_section == 1) _loadSites();
-    if (_section >= 2 && _section < 15) _loadFeature(_section);
+    if (_section >= 2 && _section < 13) _loadFeature(_section);
   }
 
   Widget _content() => Padding(
@@ -1276,10 +1300,9 @@ class _OneBoardHomeState extends State<OneBoardHome> {
       3 => _siteBrandView(),
       4 => _healthView(),
       6 => _calendarView(),
-      10 => _socialView(),
-      11 => _teamsView(),
-      14 => _settingsView(),
-      15 => _helpView(),
+      9 => _socialView(),
+      12 => _settingsView(),
+      13 => _helpView(),
       _ => _featureView(),
     },
   );
@@ -2034,16 +2057,16 @@ class _OneBoardHomeState extends State<OneBoardHome> {
   }
 
   Widget _socialView() {
-    final page = featurePages[9];
+    final page = featurePages[8];
     return ListView(
       children: [
         BufferPanel(
           api: _api!,
           workspacePath: _workspacePath,
           pickImage: _pickImage,
-          onOpenSettings: () => _loadFeature(14),
+          onOpenSettings: () => _loadFeature(12),
           onPublished: (result) async {
-            await _loadFeature(10);
+            await _loadFeature(9);
             if (mounted) setState(() => _featureResult = result);
           },
         ),
@@ -2053,33 +2076,8 @@ class _OneBoardHomeState extends State<OneBoardHome> {
     );
   }
 
-  Widget _teamsView() {
-    final page = featurePages[10];
-    return ListView(
-      children: [
-        if (_featureResult != null) ...[
-          ActionResultCard(
-            result: _featureResult!,
-            detailsBuilder: _detailValue,
-            onOpenLink: _openExternal,
-          ),
-          const SizedBox(height: 16),
-        ],
-        TeamsPanel(
-          data: _featureData,
-          actions: page.actions,
-          busy: _busy,
-          onRunAction: _runFeatureAction,
-          onOpenTeam: _openTeam,
-        ),
-        const SizedBox(height: 18),
-        _actionList(page),
-      ],
-    );
-  }
-
   Widget _settingsView() {
-    final page = featurePages[13];
+    final page = featurePages[11];
     final account =
         (_featureData['account'] as Map?)?.cast<String, dynamic>() ?? {};
     final ai = (_featureData['ai'] as Map?)?.cast<String, dynamic>() ?? {};
@@ -2101,7 +2099,7 @@ class _OneBoardHomeState extends State<OneBoardHome> {
           ai: ai,
           googleConfig: googleConfig,
           pickImage: _pickImage,
-          onChanged: () => _loadFeature(14),
+          onChanged: () => _loadFeature(12),
         ),
         const SizedBox(height: 18),
         _actionList(page),
@@ -2111,22 +2109,6 @@ class _OneBoardHomeState extends State<OneBoardHome> {
 
   Future<String?> _pickImage() =>
       _serviceChannel.invokeMethod<String>('chooseFile');
-
-  void _openTeam(int teamId) {
-    final api = _api;
-    if (api == null) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => TeamDetailView(
-          api: api,
-          teamId: teamId,
-          actions: featurePages[10].actions,
-          onRunAction: _runFeatureAction,
-          onChanged: () => _loadFeature(11),
-        ),
-      ),
-    );
-  }
 
   void _openRequest(int requestId) {
     final api = _api;
@@ -2156,15 +2138,13 @@ class _OneBoardHomeState extends State<OneBoardHome> {
     'health' => 4,
     'requests' => 5,
     'calendar' => 6,
-    'contacts' || 'inbox' => 7,
-    'alerts' => 8,
-    'reports' => 9,
-    'social' || 'buffer' => 10,
-    'teams' => 11,
-    'security' => 12,
-    'settings' => 14,
-    'help' => 15,
-    _ => 13,
+    'alerts' => 7,
+    'reports' => 8,
+    'social' || 'buffer' => 9,
+    'security' => 10,
+    'settings' => 12,
+    'help' => 13,
+    _ => 11,
   };
 
   List<Widget> _featureChildren(FeaturePage page, Map<String, dynamic> data) {

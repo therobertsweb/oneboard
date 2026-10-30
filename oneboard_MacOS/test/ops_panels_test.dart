@@ -7,7 +7,6 @@ import 'package:oneboard_flutter/request_thread_view.dart';
 import 'package:oneboard_flutter/settings_panel.dart';
 import 'package:oneboard_flutter/site_brand_panel.dart';
 import 'package:oneboard_flutter/studio_terminal_view.dart';
-import 'package:oneboard_flutter/teams_panel.dart';
 
 void main() {
   group('buffer helpers', () {
@@ -144,12 +143,6 @@ void main() {
       expect(looksLikeEmail(''), isFalse);
     });
 
-    test('teams catalog covers revoke and accept-by-id', () {
-      final teams = featurePages.firstWhere((page) => page.title == 'Teams');
-      final paths = teams.actions.map((action) => action.path).toSet();
-      expect(paths, contains('/api/teams/:team_id/invites/:invite_id'));
-      expect(paths, contains('/api/teams/invites/:invite_id/accept'));
-    });
   });
 
   group('health helpers', () {
@@ -197,22 +190,6 @@ void main() {
     test('requestStatusColor distinguishes states', () {
       expect(requestStatusColor('done'), const Color(0xFF1F9D55));
       expect(requestStatusColor('open'), const Color(0xFFB25E09));
-    });
-  });
-
-  group('teams helpers', () {
-    test('memberLabel combines name and email', () {
-      expect(
-        memberLabel({'name': 'Ana', 'email': 'a@b.com'}),
-        'Ana (a@b.com)',
-      );
-      expect(memberLabel({'email': 'a@b.com'}), 'a@b.com');
-      expect(memberLabel({'id': 3}), 'Member 3');
-    });
-
-    test('roleColor highlights privileged roles', () {
-      expect(roleColor('owner'), const Color(0xFFB33142));
-      expect(roleColor('viewer'), isNot(const Color(0xFFB33142)));
     });
   });
 

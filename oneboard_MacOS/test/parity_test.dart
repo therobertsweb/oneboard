@@ -143,14 +143,14 @@ void main() {
       },
     );
     // Everywhere else the generic buttons stay visible.
-    for (final title in ['Site Health', 'Teams', 'Calendar', 'Requests']) {
+    for (final title in ['Site Health', 'Calendar', 'Requests']) {
       expect(covered(title), isEmpty, reason: title);
     }
   });
   test('search palette covers every section and catalog action', () {
     final entries = allPaletteEntries();
     final sections = entries.where((e) => e.kind == 'section').toList();
-    expect(sections.map((e) => e.section).toSet(), hasLength(16));
+    expect(sections.map((e) => e.section).toSet(), hasLength(14));
     final actions = entries.where((e) => e.kind == 'action').toList();
     expect(
       actions.length,

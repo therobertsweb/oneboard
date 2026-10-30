@@ -2413,6 +2413,16 @@ def create_app():
             return api_error(translate("flash.account_exists"), 400)
 
         user = query_db("SELECT * FROM users WHERE email = ?", (email,), one=True)
+        if not smtp_configured():
+            token = create_email_verification_token(user["id"], user["email"])
+            return jsonify(
+                {
+                    "ok": True,
+                    "verification_required": True,
+                    "email": user["email"],
+                    "verification_token": token,
+                }
+            )
         try:
             send_email_verification(user["id"], user["email"])
         except ValueError as delivery_error:
@@ -2430,6 +2440,9 @@ def create_app():
             one=True,
         )
         if user and not user["email_verified"]:
+            if not smtp_configured():
+                token = create_email_verification_token(user["id"], user["email"])
+                return jsonify({"ok": True, "verification_token": token})
             try:
                 send_email_verification(user["id"], user["email"])
             except ValueError as error:
@@ -2459,6 +2472,9 @@ def create_app():
         email = (data.get("email") or "").strip().lower()
         user = query_db("SELECT id, email FROM users WHERE email = ?", (email,), one=True)
         if user:
+            if not smtp_configured():
+                token = create_password_reset_token(user["id"])
+                return jsonify({"ok": True, "reset_token": token})
             try:
                 send_password_reset_email(user["id"], user["email"])
             except ValueError as error:
@@ -16193,6 +16209,18 @@ def smtp_settings():
         "from_address": os.environ.get("SMTP_FROM", "").strip(),
         "use_tls": os.environ.get("SMTP_USE_TLS", "1").strip().lower() not in {"0", "false", "no"},
     }
+
+
+def smtp_configured():
+    """True when verification/reset emails can be sent.
+
+    Distributed Mac copies ship without SMTP credentials on purpose; the API
+    falls back to returning single-use tokens to the local caller instead of
+    emailing them. The service only listens on loopback, so those tokens never
+    leave the machine.
+    """
+    settings = smtp_settings()
+    return bool(settings["host"] and settings["from_address"])
 
 
 def send_email_verification(user_id, recipient):

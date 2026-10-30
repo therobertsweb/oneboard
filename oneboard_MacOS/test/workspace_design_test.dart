@@ -78,9 +78,8 @@ void main() {
       await tester.tap(find.text('Plan ahead'));
       expect(destination, 6);
       await tester.tap(find.text('Create & share'));
-      expect(destination, 10);
-      await tester.tap(find.text('Better together'));
-      expect(destination, 11);
+      expect(destination, 9);
+      expect(find.text('Better together'), findsNothing);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       if (const bool.fromEnvironment('ONEBOARD_CAPTURE_PREVIEW') &&

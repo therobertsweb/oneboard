@@ -286,5 +286,88 @@ class EmailVerificationTests(unittest.TestCase):
         self.assertTrue(upload.get_json()["account"]["avatar_path"].endswith(".png"))
 
 
+    no_smtp = {"SMTP_HOST": "", "SMTP_FROM": ""}
+
+    def test_register_without_smtp_returns_token(self):
+        with mock.patch.dict(os.environ, self.no_smtp, clear=False):
+            with mock.patch("app.smtplib.SMTP") as smtp:
+                response = self.client.post(
+                    "/api/auth/register",
+                    json={
+                        "name": "Local User",
+                        "email": "local-verify@example.test",
+                        "password": "password123",
+                        "confirm_password": "password123",
+                    },
+                )
+                smtp.assert_not_called()
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        token = response.get_json()["verification_token"]
+        self.assertTrue(token)
+        verified = self.client.post("/api/auth/verify-email", json={"token": token})
+        self.assertEqual(verified.status_code, 200)
+        login = self.client.post(
+            "/api/auth/login",
+            json={"email": "local-verify@example.test", "password": "password123"},
+        )
+        self.assertEqual(login.status_code, 200)
+
+    def test_resend_without_smtp_returns_token(self):
+        with mock.patch.dict(os.environ, self.no_smtp, clear=False):
+            self.client.post(
+                "/api/auth/register",
+                json={
+                    "name": "Resend User",
+                    "email": "local-resend@example.test",
+                    "password": "password123",
+                    "confirm_password": "password123",
+                },
+            )
+            response = self.client.post(
+                "/api/auth/resend-verification",
+                json={"email": "local-resend@example.test"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["verification_token"])
+
+    def test_forgot_without_smtp_returns_token(self):
+        with mock.patch.dict(os.environ, self.no_smtp, clear=False):
+            registered = self.client.post(
+                "/api/auth/register",
+                json={
+                    "name": "Reset User",
+                    "email": "local-reset@example.test",
+                    "password": "password123",
+                    "confirm_password": "password123",
+                },
+            )
+            self.client.post(
+                "/api/auth/verify-email",
+                json={"token": registered.get_json()["verification_token"]},
+            )
+            forgot = self.client.post(
+                "/api/auth/forgot-password",
+                json={"email": "local-reset@example.test"},
+            )
+            unknown = self.client.post(
+                "/api/auth/forgot-password",
+                json={"email": "nobody-local@example.test"},
+            )
+        self.assertEqual(forgot.status_code, 200)
+        token = forgot.get_json()["reset_token"]
+        self.assertTrue(token)
+        self.assertNotIn("reset_token", unknown.get_json())
+        reset = self.client.post(
+            "/api/auth/reset-password",
+            json={"token": token, "password": "newpass456", "confirm_password": "newpass456"},
+        )
+        self.assertEqual(reset.status_code, 200, reset.get_data(as_text=True))
+        login = self.client.post(
+            "/api/auth/login",
+            json={"email": "local-reset@example.test", "password": "newpass456"},
+        )
+        self.assertEqual(login.status_code, 200)
+
+
 if __name__ == "__main__":
     unittest.main()

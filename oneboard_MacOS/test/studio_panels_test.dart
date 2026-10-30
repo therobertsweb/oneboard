@@ -141,11 +141,6 @@ void main() {
     });
 
     test('directory inputs never use free-text fields', () {
-      final share = featurePages
-          .firstWhere((page) => page.title == 'Teams')
-          .actions
-          .firstWhere((action) => action.label == 'Share folder');
-      expect(share.specFor('path')?.type, FieldType.folder);
       final remote = featurePages
           .firstWhere((page) => page.title == 'Studio')
           .actions

@@ -29,8 +29,12 @@ if [ ! -f "$CONFIG_ENV_FILE" ]; then
   exit 1
 fi
 if ! grep -q '^SMTP_HOST=.' "$CONFIG_ENV_FILE" || ! grep -q '^SMTP_FROM=.' "$CONFIG_ENV_FILE"; then
-  echo "ONEBoard requires SMTP_HOST and SMTP_FROM in $CONFIG_ENV_FILE." >&2
-  exit 1
+  if [ "${ONEBOARD_DISTRIBUTION:-0}" = "1" ]; then
+    echo "Distribution build: no SMTP bundled; verification links complete inside the app." >&2
+  else
+    echo "ONEBoard requires SMTP_HOST and SMTP_FROM in $CONFIG_ENV_FILE." >&2
+    exit 1
+  fi
 fi
 
 if [ ! -x "$PACKAGING_VENV/bin/python" ]; then

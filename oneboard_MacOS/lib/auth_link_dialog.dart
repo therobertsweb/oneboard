@@ -25,15 +25,27 @@ String authLinkToken(String input, {required bool reset}) {
 }
 
 class AuthLinkDialog extends StatefulWidget {
-  const AuthLinkDialog({super.key, required this.api, required this.reset});
+  const AuthLinkDialog({
+    super.key,
+    required this.api,
+    required this.reset,
+    this.initialLink,
+  });
   final BoardApi api;
   final bool reset;
+  final String? initialLink;
   @override
   State<AuthLinkDialog> createState() => _AuthLinkDialogState();
 }
 
 class _AuthLinkDialogState extends State<AuthLinkDialog> {
-  final link = TextEditingController();
+  late final TextEditingController link;
+
+  @override
+  void initState() {
+    super.initState();
+    link = TextEditingController(text: widget.initialLink ?? '');
+  }
   final password = TextEditingController();
   final confirmation = TextEditingController();
   bool busy = false;

@@ -231,17 +231,7 @@ class WorkspaceDashboard extends StatelessWidget {
                         subtitle: 'Give your ideas a voice.',
                         icon: CupertinoIcons.pencil_outline,
                         color: const Color(0xFF8A70EC),
-                        onTap: () => onNavigate(10),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: BoardFeatureTile(
-                        title: 'Better together',
-                        subtitle: 'Bring your team along.',
-                        icon: CupertinoIcons.person_2,
-                        color: boardBlue,
-                        onTap: () => onNavigate(11),
+                        onTap: () => onNavigate(9),
                       ),
                     ),
                   ],
