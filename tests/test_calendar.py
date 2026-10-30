@@ -63,6 +63,20 @@ class CalendarTests(unittest.TestCase):
         with self.client.session_transaction() as session:
             session["user_id"] = user_id
 
+    def test_partial_update_preserves_dates_and_explicit_empty_end_clears_it(self):
+        created = self.client.post("/api/site-manager/calendar", json={
+            "title": "Future event", "starts_on": "2030-04-10", "ends_on": "2030-04-15",
+        }).get_json()["event"]
+        route = f"/api/site-manager/calendar/{created['id']}"
+        updated = self.client.post(route, json={"title": "Renamed"})
+        self.assertEqual(updated.status_code, 200)
+        event = updated.get_json()["event"]
+        self.assertEqual(event["starts_on"], "2030-04-10")
+        self.assertEqual(event["ends_on"], "2030-04-15")
+        cleared = self.client.post(route, json={"ends_on": ""}).get_json()["event"]
+        self.assertEqual(cleared["starts_on"], "2030-04-10")
+        self.assertEqual(cleared["ends_on"], "")
+
     def test_event_crud_and_status(self):
         today = date.today()
         created = self.client.post(

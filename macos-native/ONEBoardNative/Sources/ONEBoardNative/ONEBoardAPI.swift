@@ -44,6 +44,7 @@ enum ONEBoardAPIError: Error, LocalizedError {
     case invalidResponse
     case nonJSONResponse(Int, String)
     case server(String)
+    case verificationRequired(String)
 
     var errorDescription: String? {
         switch self {
@@ -54,6 +55,8 @@ enum ONEBoardAPIError: Error, LocalizedError {
         case .nonJSONResponse(let status, let preview):
             "ONEBoard returned non-JSON data (HTTP \(status)): \(preview)"
         case .server(let message):
+            message
+        case .verificationRequired(let message):
             message
         }
     }
@@ -503,6 +506,9 @@ final class ONEBoardAPI: ObservableObject {
             throw ONEBoardAPIError.invalidResponse
         }
 
+        if httpResponse.statusCode == 403, json["verification_required"] as? Bool == true {
+            throw ONEBoardAPIError.verificationRequired(json["error"] as? String ?? "Verify your email before signing in.")
+        }
         if !(200..<300).contains(httpResponse.statusCode) {
             throw ONEBoardAPIError.server(json["error"] as? String ?? "ONEBoard API request failed.")
         }

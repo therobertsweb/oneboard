@@ -108,7 +108,7 @@
         image_src:
           target.tagName === "IMG" ? (target.getAttribute("src") || "").slice(0, 500) : "",
       };
-      window.parent.postMessage({ type: "oneboard-selection", selection }, window.location.origin);
+      window.parent.postMessage({ type: "oneboard-selection", selection }, "*");
       setActive(false);
     },
     true

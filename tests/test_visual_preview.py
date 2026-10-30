@@ -1,7 +1,9 @@
 import os
+import re
 import sys
 import tempfile
 import unittest
+import urllib.parse
 from pathlib import Path
 from unittest import mock
 
@@ -35,7 +37,10 @@ class VisualPreviewTests(unittest.TestCase):
             "<body><h1>Hello shop</h1><p>Welcome</p></body></html>",
             encoding="utf-8",
         )
-        (self.site / "style.css").write_text("body { color: red; }", encoding="utf-8")
+        (self.site / "style.css").write_text(
+            "body { color: red; background: url('/images/background.png'); }",
+            encoding="utf-8",
+        )
 
         oneboard.app.config.update(TESTING=True)
         self.owner_id = self._create_user("Owner")
@@ -70,6 +75,13 @@ class VisualPreviewTests(unittest.TestCase):
     def test_preview_serves_workspace_pages(self):
         self.client.post("/api/site-manager/connect", json={"path": str(self.site)})
 
+        studio = self.client.get("/site-manager?tab=preview")
+        token_match = re.search(
+            r'data-preview-token="([^"]+)"', studio.get_data(as_text=True)
+        )
+        self.assertIsNotNone(token_match)
+        preview_token = token_match.group(1)
+
         page = self.client.get("/site-manager/preview/index.html")
         self.assertEqual(page.status_code, 200)
         self.assertIn("Hello shop", page.get_data(as_text=True))
@@ -83,6 +95,65 @@ class VisualPreviewTests(unittest.TestCase):
         css = self.client.get("/site-manager/preview/style.css")
         self.assertEqual(css.status_code, 200)
         self.assertIn("color: red", css.get_data(as_text=True))
+        self.assertIn(
+            "url('/site-manager/preview/images/background.png')",
+            css.get_data(as_text=True),
+        )
+
+        background = self.site / "images" / "background.png"
+        background.parent.mkdir()
+        background.write_bytes(b"preview image")
+        public_preview = oneboard.app.test_client()
+        preview_query = urllib.parse.urlencode({"preview_token": preview_token})
+        public_page = public_preview.get(
+            f"/site-manager/preview/index.html?picker=1&{preview_query}"
+        )
+        self.assertEqual(public_page.status_code, 200)
+        self.assertIn("oneboard-picker", public_page.get_data(as_text=True))
+        self.assertIn(
+            f"/site-manager/preview/style.css?preview_token={preview_token}",
+            public_page.get_data(as_text=True),
+        )
+        public_css = public_preview.get(
+            f"/site-manager/preview/style.css?{preview_query}"
+        )
+        self.assertEqual(public_css.status_code, 200)
+        self.assertIn(
+            f"/site-manager/preview/images/background.png?preview_token={preview_token}",
+            public_css.get_data(as_text=True),
+        )
+        public_image = public_preview.get(
+            f"/site-manager/preview/images/background.png?{preview_query}"
+        )
+        self.assertEqual(public_image.status_code, 200)
+        public_image.close()
+        self.assertEqual(
+            public_preview.get("/site-manager/preview/style.css").status_code, 404
+        )
+
+        root_page = self.site / "root-assets.html"
+        root_page.write_text(
+            """<html><head><link rel="stylesheet" href="/style.css">
+            <style>body { background: url('/images/inline.png'); }</style>
+            </head><body style="background: url('/images/attribute.png');"></body></html>""",
+            encoding="utf-8",
+        )
+        root_page_response = self.client.get(
+            "/site-manager/preview/root-assets.html?picker=1"
+        )
+        self.assertEqual(root_page_response.status_code, 200)
+        self.assertIn(
+            'href="/site-manager/preview/style.css"',
+            root_page_response.get_data(as_text=True),
+        )
+        self.assertIn(
+            "url('/site-manager/preview/images/inline.png')",
+            root_page_response.get_data(as_text=True),
+        )
+        self.assertIn(
+            "url('/site-manager/preview/images/attribute.png')",
+            root_page_response.get_data(as_text=True),
+        )
 
         missing = self.client.get("/site-manager/preview/nope.html")
         self.assertEqual(missing.status_code, 404)

@@ -1,6 +1,8 @@
 import io
 import os
 import re
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -29,6 +31,44 @@ class EmailVerificationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "SMTP_PORT must be a valid port number"):
                 oneboard.smtp_settings()
 
+    def test_direct_wsgi_import_loads_env_configuration(self):
+        from dotenv import dotenv_values
+        if not dotenv_values(os.path.join(oneboard.BASE_DIR, ".env")).get("SECRET_KEY"):
+            self.skipTest("Requires a local .env with SECRET_KEY")
+        environment = os.environ.copy()
+        environment.pop("SECRET_KEY", None)
+        with tempfile.TemporaryDirectory(prefix="oneboard-wsgi-test-") as directory:
+            environment["ONEBOARD_DATA_DIR"] = directory
+            result = subprocess.run([
+                sys.executable, "-c",
+                "from dotenv import dotenv_values; import app; "
+                "expected = dotenv_values('.env').get('SECRET_KEY'); "
+                "assert not expected or app.app.config['SECRET_KEY'] == expected; "
+                "assert app.create_app().config['SECRET_KEY'] == app.app.config['SECRET_KEY']",
+            ], cwd=oneboard.BASE_DIR, env=environment, capture_output=True)
+        self.assertEqual(result.returncode, 0, "WSGI configuration did not load consistently")
+
+    def test_email_links_use_public_origin_when_request_is_local(self):
+        with mock.patch.dict(os.environ, {"ONEBOARD_PUBLIC_URL": "https://board.example.test/"}):
+            with oneboard.app.test_request_context(base_url="http://127.0.0.1:5002"):
+                for endpoint in ("verify_email", "reset_password", "team_invite_landing"):
+                    link = oneboard.email_action_url(endpoint, token="test-token")
+                    self.assertTrue(link.startswith("https://board.example.test/"))
+                    self.assertTrue(link.endswith("/test-token"))
+
+    def test_email_links_fall_back_to_request_origin(self):
+        with mock.patch.dict(os.environ, {"ONEBOARD_PUBLIC_URL": ""}):
+            with oneboard.app.test_request_context(base_url="https://board.example.test"):
+                self.assertEqual(oneboard.email_action_url("verify_email", token="test-token"),
+                                 "https://board.example.test/verify-email/test-token")
+
+    def test_failed_login_preserves_email_for_verification_resend(self):
+        response = self.client.post("/login", data={
+            "email": "resend@example.test", "password": "wrong-password",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'id="resend_email" value="resend@example.test"', response.data)
+
     def test_email_requires_complete_authentication_credentials(self):
         with mock.patch.dict(
             os.environ,
@@ -42,6 +82,37 @@ class EmailVerificationTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ValueError, "SMTP_USERNAME and SMTP_PASSWORD"):
                 oneboard.send_email_verification(1, "verify@example.test")
+
+    def test_smtp_verification_failure_is_logged_without_credentials(self):
+        smtp_environment = {
+            "SMTP_HOST": "smtp.example.test",
+            "SMTP_PORT": "587",
+            "SMTP_USERNAME": "mailer@example.test",
+            "SMTP_PASSWORD": "smtp-test-secret",
+            "SMTP_FROM": "ONEBoard <noreply@example.test>",
+            "SMTP_USE_TLS": "1",
+        }
+        with mock.patch.dict(os.environ, smtp_environment):
+            with mock.patch("app.smtplib.SMTP") as smtp:
+                server = smtp.return_value.__enter__.return_value
+                server.login.side_effect = oneboard.smtplib.SMTPAuthenticationError(
+                    535, b"Authentication failed"
+                )
+                with self.assertLogs(oneboard.app.logger, level="ERROR") as captured:
+                    response = self.client.post(
+                        "/api/auth/register",
+                        json={
+                            "name": "SMTP Failure",
+                            "email": "smtp-failure@example.test",
+                            "password": "password123",
+                            "confirm_password": "password123",
+                        },
+                    )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("SMTP verification email delivery failed", captured.output[0])
+        self.assertIn("Authentication failed", "\n".join(captured.output))
+        self.assertNotIn(smtp_environment["SMTP_PASSWORD"], "\n".join(captured.output))
 
     def test_registration_requires_verification_before_login(self):
         with mock.patch("app.smtplib.SMTP") as smtp:
@@ -192,12 +263,14 @@ class EmailVerificationTests(unittest.TestCase):
         )
         self.assertEqual(email_without_password.status_code, 401)
 
-        email_change = self.client.post(
-            "/api/settings/account",
-            json={"email": "changed@example.test", "current_password": "password123"},
-        )
+        with mock.patch("app.smtplib.SMTP"):
+            email_change = self.client.post(
+                "/api/settings/account",
+                json={"email": "changed@example.test", "current_password": "password123"},
+            )
         self.assertEqual(email_change.status_code, 200, email_change.get_data(as_text=True))
-        self.assertEqual(email_change.get_json()["account"]["email"], "changed@example.test")
+        self.assertEqual(email_change.get_json()["account"]["email"], "api-account@example.test")
+        self.assertEqual(email_change.get_json()["account"]["pending_email"], "changed@example.test")
 
         avatar_png = (
             b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"

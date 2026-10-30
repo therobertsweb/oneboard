@@ -18,7 +18,7 @@
     <form method="post" class="auth-form" novalidate>
       <div class="mb-3">
         <label for="email" class="form-label">{{ t("auth.email") }}</label>
-        <input type="email" class="form-control" id="email" name="email" placeholder="admin@empresa.com" autocomplete="email" required autofocus>
+        <input type="email" class="form-control" id="email" name="email" value="{{ email }}" placeholder="admin@empresa.com" autocomplete="email" required autofocus>
       </div>
       <div class="mb-3">
         <label for="password" class="form-label">{{ t("auth.password") }}</label>
@@ -31,9 +31,9 @@
       <a href="{{ url_for('forgot_password') }}">{{ t("auth.forgot_password") }}</a>
     </p>
 
-    <form method="post" action="{{ url_for('resend_verification') }}" class="auth-form mt-3">
-      <input type="hidden" name="email" id="resend_email">
-      <button type="submit" class="btn btn-outline-secondary w-100">Resend verification email</button>
+    <form method="post" action="{{ url_for('resend_verification') }}" class="auth-form mt-3" id="resend_verification_form">
+      <input type="hidden" name="email" id="resend_email" value="{{ email }}">
+      <button type="submit" class="btn btn-outline-secondary w-100">{% if current_lang() == "es" %}Reenviar correo de verificación{% else %}Resend verification email{% endif %}</button>
     </form>
 
     <p class="auth-footer">
@@ -43,8 +43,8 @@
   </section>
 </main>
 <script>
-  document.querySelector(".auth-form input[name='email']").addEventListener("input", function () {
-    document.getElementById("resend_email").value = this.value;
+  document.getElementById("resend_verification_form").addEventListener("submit", function () {
+    document.getElementById("resend_email").value = document.getElementById("email").value;
   });
 </script>
 {% endblock %}

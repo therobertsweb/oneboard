@@ -15,6 +15,10 @@ Recovery: `POST /api/auth/forgot-password` (`{email}`) sends the reset link by e
 Resend link: `POST /api/auth/resend-verification` (`{email}`).
 Session check: `GET /api/session`.
 
+Password recovery revokes existing sessions, preview tokens, outstanding password-reset
+links and pending email changes. A password change in account settings keeps the
+initiating session and revokes other sessions.
+
 All endpoints below require login except the auth ones above.
 Success envelope: `{ok: true, ...}`. Errors: `{ok: false, error}` with HTTP status.
 
@@ -222,6 +226,12 @@ Page: `/notifications` (bell in the sidebar with the unread count).
 - `GET /api/security-scan` / `POST /api/security-scan` (`{domain}`).
 - `GET /api/settings` — account + configuration state.
 - `POST /api/settings/account` — `{name?, email?, current_password?, new_password?, confirm_password?, company_*?, buffer_api_key?}` + optional multipart `avatar` / `company_logo`.
+
+Changing `email` requires the current password and verification of the new address.
+The response retains the active `account.email` and returns `account.pending_email`.
+After confirming the emailed link, sign in with the new address. Sending an empty
+company field clears it; omitting a field leaves its value unchanged.
+
 - `GET /api/ai/providers` / `GET /api/settings/ai` — providers and policy.
 - `POST /api/settings/ai-credentials` — `{current_password, muse_api_key?, ...}`.
 - `POST /api/settings/ai-policy` — default provider/model.
@@ -231,3 +241,13 @@ Page: `/notifications` (bell in the sidebar with the unread count).
 ## Convention
 
 Every new web feature must ship with its `/api/...` equivalent and a test, so the API never falls behind the UI.
+
+### Preparar reparación de seguridad para macOS
+
+`GET /api/security-scan/<scan_id>/repair` devuelve `{ok: true, prompt: string}`.
+Requiere sesión, permiso de edición y un análisis vinculado al proyecto y dominio
+activos. Devuelve 404 si el análisis no corresponde. No ejecuta IA ni modifica
+archivos: el cliente presenta el prompt editable antes de llamar al asistente.
+Este endpoint debe desplegarse en el servidor para usar análisis históricos
+con el cliente macOS; los servidores anteriores permiten compatibilidad con
+el análisis actual mediante el endpoint de inteligencia.

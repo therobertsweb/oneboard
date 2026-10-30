@@ -38,6 +38,7 @@ build/
 # --- Respaldos y copias locales ---
 backups/
 remote-sites/
+operation-locks/
 .build-tools/
 myproject/env/
 

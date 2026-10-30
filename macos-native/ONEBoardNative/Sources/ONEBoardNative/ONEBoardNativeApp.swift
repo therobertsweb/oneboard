@@ -365,6 +365,10 @@ struct NativeAuthView: View {
             appState.authenticated = true
             appState.apiStatus = "Signed in"
             appState.lastAPIError = ""
+        } catch ONEBoardAPIError.verificationRequired(let message) {
+            verificationPending = true
+            isRegistering = false
+            appState.lastAPIError = message
         } catch {
             appState.lastAPIError = error.localizedDescription
         }

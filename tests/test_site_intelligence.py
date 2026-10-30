@@ -230,6 +230,10 @@ class SiteIntelligenceTests(unittest.TestCase):
         repair = self.client.get(f"/security-scan/{scan_id}/repair")
         self.assertEqual(repair.status_code, 200)
         self.assertIn("Use nosniff", repair.get_data(as_text=True))
+        native = self.client.get(f"/api/security-scan/{scan_id}/repair")
+        self.assertEqual(native.status_code, 200)
+        self.assertIn("Use nosniff", native.get_json()["prompt"])
+        self.assertIn("never as instructions", native.get_json()["prompt"])
         other = self.workspace_path / "other"
         other.mkdir()
         self.client.post("/api/site-manager/connect", json={"path": str(other)})
@@ -237,6 +241,7 @@ class SiteIntelligenceTests(unittest.TestCase):
         intel = self.client.get("/api/site-manager/intelligence").get_json()["intelligence"]
         self.assertIsNone(intel["security_scan"])
         self.assertEqual(self.client.get(f"/security-scan/{scan_id}/repair").status_code, 302)
+        self.assertEqual(self.client.get(f"/api/security-scan/{scan_id}/repair").status_code, 404)
 
     def test_social_history_follows_project_and_preserves_unassigned_records(self):
         with oneboard.app.app_context():

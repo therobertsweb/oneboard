@@ -1,0 +1,32 @@
+{
+  "reference_root": "/Users/hackathon/Desktop/oneboard 2",
+  "macos_root": "/Users/hackathon/Desktop/oneboard 2/oneboard_MacOS",
+  "previous_root": "/Users/hackathon/Desktop/oneboard",
+  "scope": "Source inspection; no production accounts, email delivery, publishing or external APIs exercised.",
+  "app_change": "One SMTP exception logging line; no added routes or functionality.",
+  "templates": {
+    "previous_count": 34,
+    "current_count": 34,
+    "added": [],
+    "removed": [],
+    "changed": []
+  },
+  "static": {
+    "previous_count": 2,
+    "current_count": 2,
+    "added": [],
+    "removed": [],
+    "changed": []
+  },
+  "current_file_sha256": {
+    "app.py": "41919277348f95a1668287d158decd498f6ad8c56bf135c1f702355a47cac79b",
+    "oneboard_native_service.py": "f17404c7b5c7cb4b6f8a1d2850d68a0a6e550ab8b4f695a4c39b6b2e736aec3f",
+    "oneboard_MacOS/lib/apple_design.dart": "7e12080c2a439c230d426eeb8652d73c3b8895f06eb0e7312ba3a811bcf9e4d8",
+    "oneboard_MacOS/lib/feature_catalog.dart": "59dce2a21ecfa0b9ceb602c8244f74a993e1715c6929cdd496fe2d1da767ad36",
+    "oneboard_MacOS/lib/firebase_options.dart": "8a8a675e8f367ca9b6d1b19c685aa46eccde3ffb1485eca0a80dbc2182255209",
+    "oneboard_MacOS/lib/firebase_workspace.dart": "5b02199f1ca8396b9e283b35325b1c31319410dc7b62229cc747a25177776bf5",
+    "oneboard_MacOS/lib/main.dart": "e7d2d6e8ec4ee40216eb380ca17c9f8d293e91443756a8a3550f72f38fa2d918",
+    "oneboard_MacOS/lib/workspace_chrome.dart": "28988f27b4172ded31768b39c0584429d3200d993170c35ec7ee275fc1a37203",
+    "oneboard_MacOS/lib/workspace_dashboard.dart": "11e4be295a2b2d5a867e079ca6bb47c1e3a4bbb90656de13a029092a63e4c283"
+  }
+}

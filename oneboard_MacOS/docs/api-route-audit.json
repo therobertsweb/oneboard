@@ -1,0 +1,66 @@
+{
+  "backend_api_method_routes": 120,
+  "referenced_matching_method_routes": 110,
+  "unreferenced": [
+    {
+      "method": "POST",
+      "path": "/api/auth/verify-email",
+      "line": 2397
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/reset-password",
+      "line": 2418
+    },
+    {
+      "method": "GET",
+      "path": "/api/google-search-console/callback",
+      "line": 2464
+    },
+    {
+      "method": "GET",
+      "path": "/api/site-manager/browse-directory",
+      "line": 2559
+    },
+    {
+      "method": "GET",
+      "path": "/api/site-manager/files/raw",
+      "line": 2585
+    },
+    {
+      "method": "GET",
+      "path": "/api/site-manager/assets/raw",
+      "line": 2600
+    },
+    {
+      "method": "POST",
+      "path": "/api/seo-suggestions/create",
+      "line": 2750
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/teams/<int:team_id>/invites/<int:invite_id>",
+      "line": 4811
+    },
+    {
+      "method": "POST",
+      "path": "/api/teams/invites/<int:invite_id>/accept",
+      "line": 4834
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/ai",
+      "line": 5292
+    }
+  ],
+  "unmatched_client_references": [
+    [
+      "GET",
+      "/api/site-manager$query"
+    ]
+  ],
+  "reference_root": "/Users/hackathon/Desktop/oneboard 2",
+  "macos_root": "/Users/hackathon/Desktop/oneboard 2/oneboard_MacOS",
+  "scope": "Static method-route references, not a functional completeness percentage.",
+  "dynamic_reference_note": "GET /api/site-manager$query is covered by the catalog base route; callback and native folder picker omissions can be intentional."
+}

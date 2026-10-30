@@ -139,8 +139,14 @@ class ReadinessTests(unittest.TestCase):
 
     def test_shared_directory_lock_rejects_another_user_during_edit(self):
         with oneboard.app.app_context():
-            second = oneboard.execute_db("INSERT INTO users (name,email,password_hash) VALUES ('Other', ?, 'unused')", (f"other-{self.sequence}@example.test",))
-            oneboard.connect_site_directory(second, str(self.site))
+            second = oneboard.execute_db("INSERT INTO users (name,email,password_hash,email_verified) VALUES ('Other', ?, 'unused',1)", (f"other-{self.sequence}@example.test",))
+            team = oneboard.create_team(self.user_id, "Shared lock test")
+            project = oneboard.query_db("SELECT id FROM website_workspaces WHERE user_id = ? AND path = ?",
+                                       (self.user_id, str(self.site.resolve())), one=True)
+            oneboard.add_team_project(team["id"], self.user_id, project_id=project["id"])
+            _, token = oneboard.invite_team_member(team["id"], self.user_id, f"other-{self.sequence}@example.test")
+            oneboard.accept_team_invite(token, second)
+            oneboard.connect_site_project(second, project_id=project["id"])
         entered = threading.Event()
         release = threading.Event()
         def hold():

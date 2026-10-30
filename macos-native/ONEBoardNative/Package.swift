@@ -13,6 +13,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "ONEBoardNative"
+        ),
+        .testTarget(
+            name: "ONEBoardNativeTests",
+            dependencies: ["ONEBoardNative"]
         )
     ]
 )

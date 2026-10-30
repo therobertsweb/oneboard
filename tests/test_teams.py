@@ -26,6 +26,9 @@ class TeamsTests(unittest.TestCase):
         TEST_HOME.cleanup()
 
     def setUp(self):
+        mailer = mock.patch.object(oneboard, "send_team_invite_email")
+        self.mailer = mailer.start()
+        self.addCleanup(mailer.stop)
         self.workspace = tempfile.TemporaryDirectory(prefix="oneboard-teams-workspace-")
         self.workspace_path = Path(self.workspace.name)
         self.site = self.workspace_path / "team-site"
@@ -108,6 +111,30 @@ class TeamsTests(unittest.TestCase):
         self.assertEqual(editor["role"], "editor")
         self.assertTrue(editor["permissions"]["edit"])
         self.assertFalse(editor["permissions"]["publish"])
+
+    def test_invitation_returns_after_login_and_can_be_accepted(self):
+        team = self._create_team()
+        invite = self._invite(team["id"], self._email_of(self.editor_id))
+        path = "/teams/invites/" + invite["invite_link"].rsplit("/", 1)[-1]
+        guest = oneboard.app.test_client()
+        self.assertEqual(guest.get(path).status_code, 200)
+        login = guest.post("/login", data={
+            "email": self._email_of(self.editor_id), "password": "password123",
+        })
+        self.assertEqual(login.status_code, 302)
+        self.assertEqual(login.location, path)
+        accepted = guest.post(path + "/accept")
+        self.assertEqual(accepted.status_code, 302)
+        self.assertEqual(guest.get(f"/api/teams/{team['id']}").status_code, 200)
+
+    def test_invitation_reports_delivery_failure_and_keeps_manual_link(self):
+        team = self._create_team()
+        self.mailer.side_effect = ValueError("SMTP delivery failed")
+        invite = self._invite(team["id"], self._email_of(self.editor_id))
+        self.assertFalse(invite["email_sent"])
+        self.assertEqual(invite["email_error"], "SMTP delivery failed")
+        self.login(self.editor_id)
+        self.assertEqual(self._accept(invite["invite_link"])["id"], team["id"])
 
     def test_team_projects_are_shared_with_members(self):
         team = self._create_team()

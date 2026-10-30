@@ -589,6 +589,7 @@
       {% if manager.directory %}
       <div class="d-flex gap-2 flex-wrap align-items-end mb-2" id="previewControls"
         data-preview-base="{{ url_for('site_manager_preview_index') }}"
+        data-preview-token="{{ preview_access_token }}"
         data-select-url="{{ url_for('api_preview_select') }}"
         data-codex-url="{{ url_for('api_site_manager_codex_update') }}"
         data-select-label="{{ t('site.preview_select') }}"
@@ -601,7 +602,7 @@
         <button type="button" class="btn btn-outline-primary btn-sm" id="previewSelectBtn">{{ t("site.preview_select") }}</button>
       </div>
       <p class="settings-note">{{ t("site.preview_select_hint") }}</p>
-      <iframe id="previewFrame" sandbox="allow-scripts" title="{{ t('site.tab_preview') }}" class="preview-frame" src="{{ url_for('site_manager_preview_file', filepath='index.html') }}?picker=1"></iframe>
+      <iframe id="previewFrame" sandbox="allow-scripts" title="{{ t('site.tab_preview') }}" class="preview-frame" src="{{ url_for('site_manager_preview_file', filepath='index.html', picker=1, preview_token=preview_access_token) }}"></iframe>
       <div id="previewSelection" class="mt-2" hidden>
         <p><strong>{{ t("site.preview_selected") }}:</strong> <code id="previewSelectionLabel"></code></p>
         <div class="d-flex gap-2 flex-wrap align-items-end">
@@ -1041,7 +1042,10 @@
 
     function previewUrl() {
       const path = (pathInput.value || "index.html").replace(/^\/+/, "");
-      return `${previewControls.dataset.previewBase}/${path}?picker=1`;
+      const url = new URL(`${previewControls.dataset.previewBase}/${path}`, window.location.href);
+      url.searchParams.set("picker", "1");
+      url.searchParams.set("preview_token", previewControls.dataset.previewToken);
+      return url.toString();
     }
     function setSelecting(value) {
       selecting = value;
@@ -1085,6 +1089,7 @@
         const payload = await response.json();
         if (!response.ok || !payload.ok) throw new Error(payload.error || "Request failed.");
         showSelection(payload.selection);
+        promptInput.focus();
       } catch (error) {
         alert(error.message);
       }
@@ -1113,6 +1118,12 @@
       } catch (error) {
         alert(error.message);
         applyBtn.disabled = false;
+      }
+    });
+    promptInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        applyBtn.click();
       }
     });
     document.querySelectorAll(".preview-device").forEach((button) => {

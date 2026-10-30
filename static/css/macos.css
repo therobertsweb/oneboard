@@ -1,0 +1,37 @@
+/* Desktop presentation; the web application's routes and controls stay intact. */
+:root {
+  color-scheme: light;
+  --bg: #f5f5f7;
+  --bg-raised: #edeef2;
+  --surface: #fff;
+  --surface-2: #f0f2f7;
+  --surface-3: #e7eaf1;
+  --ink: #1d1d1f;
+  --body: #35353b;
+  --muted: #6e6e73;
+  --line: rgba(30,40,60,.08);
+  --line-strong: rgba(30,40,60,.18);
+  --brand: #007aff;
+  --brand-dark: #0062d1;
+  --brand-soft: rgba(0,122,255,.09);
+  --success: #248a3d;
+  --warning: #986000;
+  --danger: #c52d32;
+  --info: #0062d1;
+  --shadow: 0 8px 28px rgba(30,40,60,.06);
+  --radius-md: 16px;
+  --radius-lg: 20px;
+}
+body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+.sidebar { background: linear-gradient(160deg,#eeeef5,#e9edf5); }
+.sidebar-nav { gap: 4px; }
+.sidebar-nav a { font-weight: 500; }
+.sidebar-nav a.active { background: #fff; color: var(--brand); box-shadow: 0 2px 8px #243b7010; }
+.btn { border-radius: 9px; }
+.btn-primary { background: var(--brand); border-color: var(--brand); color: white; }
+.btn-primary:hover, .btn-primary:focus { background: var(--brand-dark); border-color: var(--brand-dark); color: white; }
+.form-control, .form-select, .form-control:focus, .form-select:focus { background-color: white; color: var(--ink); }
+.form-control:focus, .form-select:focus { box-shadow: 0 0 0 3px var(--brand-soft); }
+.overview-card, .stat-card { box-shadow: 0 3px 14px #243b7007; }
+.overview-label { font-family: inherit; }
+::selection { background: #007aff30; color: var(--ink); }

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Contacto | ONEBoard Demo Website</title>
+    <meta name="description" content="Ponte en contacto con el equipo de ONEBoard Demo Website.">
+    <link rel="stylesheet" href="assets/styles.css">
+  </head>
+  <body>
+    <main class="page">
+      <nav class="nav" aria-label="Navegación principal">
+        <a href="index.html">&larr; Inicio</a>
+        <a href="contacto.html" aria-current="page">Contacto</a>
+      </nav>
+
+      <p class="eyebrow">Contacto</p>
+      <h1>Hablemos</h1>
+      <p class="lead">
+        ¿Tienes alguna pregunta o quieres contarnos algo sobre el proyecto?
+        Completa el formulario y te responderemos lo antes posible.
+      </p>
+
+      <form class="contact-form" action="#" method="post">
+        <div class="field">
+          <label for="nombre">Nombre *</label>
+          <input id="nombre" name="nombre" type="text" autocomplete="name" placeholder="Tu nombre" required>
+        </div>
+
+        <div class="field">
+          <label for="email">Correo electrónico *</label>
+          <input id="email" name="email" type="email" autocomplete="email" placeholder="tu@correo.com" required>
+        </div>
+
+        <div class="field">
+          <label for="asunto">Asunto</label>
+          <input id="asunto" name="asunto" type="text" placeholder="¿De qué quieres hablarnos?">
+        </div>
+
+        <div class="field">
+          <label for="mensaje">Mensaje *</label>
+          <textarea id="mensaje" name="mensaje" rows="6" placeholder="Escribe tu mensaje..." required></textarea>
+        </div>
+
+        <button class="button" type="submit">Enviar mensaje</button>
+        <p class="form-note">* Campos obligatorios</p>
+      </form>
+    </main>
+  </body>
+</html>

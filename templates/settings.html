@@ -74,6 +74,9 @@
           <div>
             <label for="email" class="form-label">{{ t("auth.email") }}</label>
             <input type="email" class="form-control" id="email" name="email" value="{{ account.email }}" required>
+            {% if account.pending_email %}
+            <p class="settings-note">{% if current_lang() == "es" %}Cambio pendiente a {{ account.pending_email }}. Confirma el enlace enviado a ese correo. Tu dirección actual sigue activa.{% else %}Change pending to {{ account.pending_email }}. Confirm the link sent to that address. Your current address remains active.{% endif %}</p>
+            {% endif %}
           </div>
           <div>
             <label for="language" class="form-label">{{ t("settings.language") }}</label>

@@ -21,6 +21,7 @@
     {% else %}
     <p>{% if current_lang() == "es" %}Este enlace es inválido o expiró. Regresa a ONEBoard para solicitar uno nuevo.{% else %}This verification link is invalid or has expired. Return to ONEBoard to request a new one.{% endif %}</p>
     {% endif %}
+    <a class="btn btn-primary w-100" href="{{ url_for('login') }}">{{ t("auth.sign_in") }}</a>
   </section>
 </main>
 {% endblock %}
